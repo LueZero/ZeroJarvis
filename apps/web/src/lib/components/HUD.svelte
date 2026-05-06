@@ -42,6 +42,8 @@
   let menuOpen = $state(false);
   let audioPlaying = $state(false);
   let listenPaused = $state(false);
+  let chatInput = $state("");
+  let showChatInput = $state(false);
 
 
   // Connect to Gateway on mount & auto-start mic
@@ -336,6 +338,25 @@
     menuOpen = false;
   }
 
+  function sendChatText() {
+    const text = chatInput.trim();
+    if (!text) return;
+    // Stop VAD while processing
+    stopVAD();
+    setState("thinking");
+    setSttText(text);
+    setLlmText("");
+    send({ type: "audio_text", text });
+    chatInput = "";
+  }
+
+  function handleChatKeydown(e: KeyboardEvent) {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      sendChatText();
+    }
+  }
+
   // Get display state label
   function stateLabel(s: string): string {
     switch (s) {
@@ -388,6 +409,10 @@
             <span class="mi-icon">🔄</span>
             <span>新對話</span>
           </button>
+          <button class="menu-item" onclick={() => { showChatInput = !showChatInput; menuOpen = false; }}>
+            <span class="mi-icon">⌨️</span>
+            <span>{showChatInput ? '隱藏輸入框' : '文字輸入'}</span>
+          </button>
           {#if getState() === "speaking"}
             <button class="menu-item danger" onclick={() => { handleInterrupt(); menuOpen = false; }}>
               <span class="mi-icon">■</span>
@@ -429,9 +454,25 @@
   {/if}
 
   <!-- Subtitle overlay (bottom, does not push layout) -->
-  <div class="hud-subtitle-overlay" class:hidden={getCameraOn()} class:has-tabs={getSessions().length > 1}>
+  <div class="hud-subtitle-overlay" class:hidden={getCameraOn() || showChatInput} class:has-tabs={getSessions().length > 1}>
     <Subtitle />
   </div>
+
+  <!-- Text input bar (replaces subtitle area when active) -->
+  {#if showChatInput}
+    <div class="chat-input-bar" class:has-tabs={getSessions().length > 1}>
+      <input
+        type="text"
+        class="chat-input"
+        placeholder="輸入訊息或貼上連結..."
+        bind:value={chatInput}
+        onkeydown={handleChatKeydown}
+      />
+      <button class="chat-send-btn" onclick={sendChatText} disabled={!chatInput.trim()}>
+        ➤
+      </button>
+    </div>
+  {/if}
 
   <!-- Session tabs (bottom bar, only shown when >1 session) -->
   <SessionTabs onSwitch={(id) => send({ type: 'switch_session', sessionId: id } as any)} />
@@ -829,5 +870,70 @@
   @keyframes pulse-listen {
     0%, 100% { box-shadow: 0 0 20px rgba(0, 212, 255, 0.3); }
     50% { box-shadow: 0 0 30px rgba(0, 212, 255, 0.6); }
+  }
+
+  /* Chat input bar — same position as subtitle */
+  .chat-input-bar {
+    position: fixed;
+    bottom: 24px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 50;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: calc(100% - 32px);
+    max-width: 600px;
+    padding: 8px 12px;
+    border-radius: 24px;
+    border: 1px solid rgba(0, 212, 255, 0.3);
+    background: rgba(10, 15, 30, 0.9);
+    backdrop-filter: blur(12px);
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+  }
+
+  .chat-input-bar.has-tabs {
+    bottom: 56px;
+  }
+
+  .chat-input {
+    flex: 1;
+    border: none;
+    outline: none;
+    background: transparent;
+    color: #e8eaf0;
+    font-size: 0.95rem;
+    padding: 6px 4px;
+    font-family: inherit;
+  }
+
+  .chat-input::placeholder {
+    color: rgba(200, 210, 230, 0.4);
+  }
+
+  .chat-send-btn {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    border: 1px solid rgba(0, 212, 255, 0.4);
+    background: rgba(0, 212, 255, 0.1);
+    color: #00d4ff;
+    font-size: 1.1rem;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s;
+    flex-shrink: 0;
+  }
+
+  .chat-send-btn:hover:not(:disabled) {
+    background: rgba(0, 212, 255, 0.2);
+    box-shadow: 0 0 10px rgba(0, 212, 255, 0.3);
+  }
+
+  .chat-send-btn:disabled {
+    opacity: 0.3;
+    cursor: default;
   }
 </style>

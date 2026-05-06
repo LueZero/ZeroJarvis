@@ -101,17 +101,94 @@ export function handleWebSocket() {
         }
 
         case "audio_text": {
-          // Browser-side STT done
+          // Text input (typed by user) — send directly to LLM like voice
           log("STT", `Received transcribed text: "${msg.text}"`);
           send(ws, { type: "stt_final", text: msg.text });
 
-          setState(ws, "thinking");
-          try {
-            const polishResult = await polish(msg.text);
-            send(ws, { type: "polished", data: polishResult });
-          } catch (err) {
-            send(ws, { type: "error", message: String(err) });
+          if (!msg.text.trim()) {
             setState(ws, "idle");
+            break;
+          }
+
+          if (ws.data.processing) {
+            logWarn("WS", "Already processing, ignoring text input");
+            break;
+          }
+
+          ws.data.processing = true;
+          setState(ws, "thinking");
+
+          const activeSessionText = sessionManager.getActive();
+          if (activeSessionText) {
+            sessionManager.setTitle(activeSessionText.id, msg.text);
+            sessionManager.setStatus(activeSessionText.id, "processing");
+            sendSessionList(ws);
+          }
+
+          const managedId = activeSessionText?.id ?? sessionManager.ensureSession().id;
+          const textPipelineStart = performance.now();
+
+          try {
+            let fullText = "";
+            await chatStream(
+              msg.text,
+              managedId,
+              (delta) => {
+                fullText += delta;
+                if (sessionManager.getActiveId() === managedId) {
+                  send(ws, { type: "llm_delta", text: delta });
+                }
+              },
+              (text) => {
+                fullText = text;
+                sessionManager.setLastText(managedId, text);
+                sessionManager.setStatus(managedId, "done");
+
+                const { cleanText, actions } = parseActions(fullText);
+
+                if (sessionManager.getActiveId() === managedId) {
+                  log("LLM", `Response: "${cleanText.slice(0, 80)}..."`);
+                  send(ws, { type: "llm_done", text: cleanText });
+                  for (const a of actions) {
+                    send(ws, { type: "action", action: a.action, payload: a.payload });
+                  }
+                } else {
+                  send(ws, { type: "session_done", sessionId: managedId, text: cleanText } as any);
+                }
+                sendSessionList(ws);
+              },
+              (err) => { throw err; },
+            );
+
+            const llmTime = Math.round(performance.now() - textPipelineStart);
+            const { cleanText, actions } = parseActions(fullText);
+
+            // TTS (only if still active session)
+            if (cleanText && sessionManager.getActiveId() === managedId) {
+              setState(ws, "speaking");
+              const ttsStart = performance.now();
+              try {
+                const audioData = await synthesize(cleanText);
+                const ttsTime = Math.round(performance.now() - ttsStart);
+                log("TTS", `Synthesized ${audioData.byteLength} bytes (${ttsTime}ms)`);
+                ws.send(audioData);
+                send(ws, { type: "tts_end" });
+                log("TIMING", `stt=0ms llm=${llmTime}ms tts=${ttsTime}ms total=${Math.round(performance.now() - textPipelineStart)}ms`);
+              } catch (ttsErr) {
+                logWarn("TTS", `Failed: ${ttsErr}`);
+                setState(ws, "idle");
+              }
+            } else {
+              setState(ws, "idle");
+            }
+          } catch (err) {
+            sessionManager.setStatus(managedId, "error");
+            sendSessionList(ws);
+            logError("LLM", `Chat failed: ${err}`);
+            send(ws, { type: "error", message: `對話失敗: ${err}` });
+            setState(ws, "idle");
+          } finally {
+            ws.data.processing = false;
           }
           break;
         }

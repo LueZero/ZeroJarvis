@@ -112,6 +112,7 @@ export async function chatStream(
 
     // 3. Read events with detailed logging
     let fullText = "";
+    let reasoningText = "";
     let done = false;
     let toolStartTimes: Map<string, number> = new Map();
 
@@ -133,47 +134,81 @@ export async function chatStream(
         const evtSessionId = props.sessionID ?? props.part?.sessionID;
         if (evtSessionId && evtSessionId !== sessionId) continue;
 
+        // Handle message.part.updated (the primary streaming event)
         if (evt.type === "message.part.updated") {
           const part = props.part;
           if (!part) continue;
 
-          // Text streaming
+          // Text streaming — prefer delta if available, fallback to diff
           if (part.type === "text") {
             const newText = part.text ?? "";
-            if (newText.length > fullText.length) {
-              const delta = newText.slice(fullText.length);
+            // Skip user's own message echo (OpenCode replays input as a text event)
+            if (newText.trim() === message.trim()) continue;
+            // Use delta from properties if available (SDK v1.14.33+)
+            if (props.delta) {
               fullText = newText;
-              onDelta(delta);
-              // Log first chunk and every 200 chars
-              if (fullText.length === delta.length || fullText.length % 200 < delta.length) {
-                log("LLM", `[${ts()}] [TEXT] (${fullText.length} chars) "${fullText.slice(-80)}"`);
+              onDelta(props.delta);
+            } else {
+              // Fallback: detect new message part (assistant response starts fresh)
+              if (newText.length < fullText.length) {
+                fullText = "";
               }
+              if (newText.length > fullText.length) {
+                const delta = newText.slice(fullText.length);
+                fullText = newText;
+                onDelta(delta);
+              }
+            }
+            // Log periodically
+            if (fullText.length > 0 && (fullText.length <= 20 || fullText.length % 200 < 20)) {
+              log("LLM", `[${ts()}] [TEXT] (${fullText.length} chars) "${fullText.slice(-80)}"`);
             }
           }
 
-          // Tool invocation logging with timing
-          if (part.type === "tool-invocation") {
-            const inv = part.toolInvocation ?? part;
-            const toolName = inv.toolName ?? "unknown";
-            const state = inv.state ?? "";
-            const toolKey = `${toolName}-${inv.toolCallId ?? ""}`;
+          // Reasoning / thinking content (type: "reasoning")
+          if (part.type === "reasoning") {
+            const text = part.text ?? "";
+            if (text.length > reasoningText.length) {
+              reasoningText = text;
+              log("LLM", `[${ts()}] [REASONING] (${reasoningText.length} chars) "${reasoningText.slice(-100)}"`);
+            }
+          }
 
-            if (state === "call" || state === "partial-call") {
+          // Tool invocation logging (SDK: type "tool", state.status)
+          if (part.type === "tool") {
+            const toolName = part.tool ?? "unknown";
+            const state = part.state;
+            const toolKey = `${toolName}-${part.callID ?? part.id ?? ""}`;
+
+            if (state?.status === "running") {
               toolStartTimes.set(toolKey, performance.now());
-              const args = inv.args ? JSON.stringify(inv.args).slice(0, 120) : "";
-              log("LLM", `[${ts()}] [TOOL:CALL] ${toolName}(${args})`);
-            } else if (state === "result") {
+              const input = state.input ? JSON.stringify(state.input).slice(0, 120) : "";
+              log("LLM", `[${ts()}] [TOOL:CALL] ${toolName}(${input})`);
+            } else if (state?.status === "completed") {
               const elapsed = toolStartTimes.has(toolKey)
                 ? Math.round(performance.now() - toolStartTimes.get(toolKey)!)
                 : 0;
-              const result = typeof inv.result === "string"
-                ? inv.result.slice(0, 200)
-                : JSON.stringify(inv.result ?? "").slice(0, 200);
+              const result = typeof state.output === "string"
+                ? state.output.slice(0, 200)
+                : JSON.stringify(state.output ?? "").slice(0, 200);
               log("LLM", `[${ts()}] [TOOL:DONE] ${toolName} → ${result} (${elapsed}ms)`);
               toolStartTimes.delete(toolKey);
-            } else {
-              log("LLM", `[${ts()}] [TOOL] ${toolName} → ${state}`);
+            } else if (state?.status === "error") {
+              log("LLM", `[${ts()}] [TOOL:ERR] ${toolName} → ${state.error ?? "unknown error"}`);
+              toolStartTimes.delete(toolKey);
+            } else if (state?.status === "pending") {
+              log("LLM", `[${ts()}] [TOOL:PEND] ${toolName}`);
             }
+          }
+
+          // Step start/finish for token tracking
+          if (part.type === "step-start") {
+            log("LLM", `[${ts()}] [STEP:START] part=${part.id}`);
+          }
+          if (part.type === "step-finish") {
+            const tokens = part.tokens;
+            const cost = part.cost ?? 0;
+            log("LLM", `[${ts()}] [STEP:FINISH] reason=${part.reason ?? "?"} cost=$${cost.toFixed(4)} tokens=[in:${tokens?.input ?? 0} out:${tokens?.output ?? 0} reasoning:${tokens?.reasoning ?? 0} cache_r:${tokens?.cache?.read ?? 0} cache_w:${tokens?.cache?.write ?? 0}]`);
           }
         }
 
@@ -189,8 +224,8 @@ export async function chatStream(
           throw new Error(`OpenCode error: ${errMsg}`);
         }
 
-        // Log other event types
-        if (evt.type !== "message.part.updated") {
+        // Log other event types (skip high-frequency ones)
+        if (evt.type !== "message.part.updated" && evt.type !== "message.updated") {
           log("LLM", `[${ts()}] [EVENT] ${evt.type}`);
         }
       }

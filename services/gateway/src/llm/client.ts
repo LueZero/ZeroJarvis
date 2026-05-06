@@ -2,11 +2,14 @@
  * OpenCode SDK client singleton
  * Connects to an external `opencode serve` instance.
  *
- * SDK: @opencode-ai/sdk (Stainless-generated)
+ * SDK: @opencode-ai/sdk v1.14.33 (hey-api generated)
  * Key resources:
  *   client.session.create() → Session
- *   client.session.chat(id, params) → AssistantMessage
- *   client.event.list() → Stream<EventListResponse>
+ *   client.session.promptAsync({ path: { id }, body: { parts, agent } }) → fire-and-forget
+ *   client.event.subscribe() → SSE Stream<Event>
+ *
+ * Event types: message.part.updated (Part: text | reasoning | tool | step-start | step-finish | snapshot)
+ *              session.idle, session.error, message.updated, session.updated, ...
  */
 
 import { createOpencodeClient } from "@opencode-ai/sdk";
