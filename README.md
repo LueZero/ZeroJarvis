@@ -17,6 +17,7 @@
 - **串流日誌** — Gateway 終端機即時顯示 AI 處理過程、工具呼叫、耗時統計
 - **Skill 系統** — AI 行為由 Skill 文件驅動，易於擴充
 - **ACTION 標記** — AI 主動控制前端（攝像頭、地圖等）
+- **NotebookLM 整合** — 透過 MCP 操作 Google NotebookLM（問答、Podcast 產生）
 - **對話記憶** — OpenCode Session 持久化，AI 記得上下文
 
 ## 快速開始
@@ -95,7 +96,8 @@ ZeroJarvis/
 │       ├── hardware-control/  # 攝像頭控制技能
 │       ├── food-map/          # 地圖導航技能
 │       ├── screenshot/        # 螢幕截圖技能
-│       └── youtube/           # YouTube 影片技能
+│       ├── youtube/           # YouTube 影片技能
+│       └── notebooklm/        # NotebookLM 筆記本 (MCP)
 ├── start.bat / start.ps1           # Web 版啟動
 ├── start-desktop.bat / .ps1        # Desktop 版啟動
 └── docs/DESIGN.md       # 完整設計文件
@@ -148,7 +150,8 @@ Skills 是 Markdown 文件，定義 AI 在特定情境下的行為規則：
 ├── screenshot/SKILL.md        # 教 AI 何時截取螢幕
 ├── youtube/SKILL.md           # 教 AI 何時播放 YouTube 影片
 ├── session/SKILL.md           # 教 AI 何時切換/建立對話
-└── listen-control/SKILL.md   # 教 AI 何時暫停/恢復聆聽
+├── listen-control/SKILL.md   # 教 AI 何時暫停/恢復聆聽
+└── notebooklm/SKILL.md       # 教 AI 何時操作 NotebookLM 筆記本
 ```
 
 新增功能只需撰寫新的 Skill 文件 + 對應的前端 ACTION handler。
@@ -217,6 +220,72 @@ GROQ_API_KEY=gsk_xxxxxxxxxxxx     # 必要：Groq STT
 TTS_VOICE=zh-TW-HsiaoChenNeural  # 可選：TTS 語音
 OPENCODE_URL=http://localhost:4096 # 可選：OpenCode 位址
 ```
+
+## NotebookLM 整合（MCP）
+
+透過 [notebooklm-mcp](https://github.com/PleasePrompto/notebooklm-mcp) 讓 Jarvis 可直接操作 Google NotebookLM。
+
+### 功能
+
+- **問答** — 對筆記本內容提問，取得帶引用的 Gemini 2.5 回覆
+- **來源管理** — 新增 URL 或文字到筆記本
+- **Podcast 產生** — 產生 Audio Overview（雙人對話摘要）
+- **筆記本管理** — 列出、搜尋、切換筆記本
+
+### 首次設定（認證）
+
+```bash
+# 方法一：跟 Jarvis 說「登入 NotebookLM」
+# → AI 會呼叫 setup_auth 工具，Chrome 視窗彈出讓你登入 Google
+
+# 方法二：手動執行（HEADLESS=false 才能看到登入視窗）
+set HEADLESS=false
+npx notebooklm-mcp@latest
+# → 等待 MCP 啟動後，透過 MCP client 呼叫 setup_auth
+```
+
+登入成功後 Cookie 保存在 `%LOCALAPPDATA%\notebooklm-mcp\Data\chrome_profile\`，後續自動登入。
+
+### 注意事項
+
+| 項目 | 說明 |
+|------|------|
+| 首次認證 | 必須先登入 Google，否則所有工具回報認證失敗 |
+| 回應延遲 | `ask_question` 約 10-30 秒（Chrome 自動化 + Gemini 回覆） |
+| Podcast 耗時 | `generate_audio` 約 3-10 分鐘（NotebookLM 背景處理） |
+| Context 消耗 | `standard` profile 註冊 10 個工具，佔一定 token |
+| Chrome 佔用 | MCP 在背景運行 headless Chrome，佔約 200-400MB RAM |
+| Windows 限制 | 完全支援，Chrome profile 路徑為 `%LOCALAPPDATA%\notebooklm-mcp\` |
+| Cookie 過期 | 如認證失效，跟 Jarvis 說「重新登入 NotebookLM」即可 |
+
+### 設定位置
+
+`opencode.json` 中的 `mcp.notebooklm` 區塊：
+```json
+"mcp": {
+  "notebooklm": {
+    "type": "local",
+    "command": ["npx", "notebooklm-mcp@latest"],
+    "enabled": true,
+    "environment": {
+      "HEADLESS": "true",
+      "NOTEBOOKLM_AI_MARKER": "false",
+      "NOTEBOOKLM_PROFILE": "standard"
+    }
+  }
+}
+```
+
+### 語音觸發範例
+
+| 語音指令 | AI 行為 |
+|---------|---------|
+| 「幫我查筆記本裡關於 X 的內容」 | `ask_question` |
+| 「我有哪些筆記本」 | `list_notebooks` |
+| 「切到 XX 筆記本」 | `select_notebook` |
+| 「把這個網址加到筆記本」 | `add_source` |
+| 「產生 Podcast」 | `generate_audio` |
+| 「建一個新筆記本」 | `add_notebook` |
 
 ## 疑難排解
 

@@ -82,6 +82,7 @@ ACTION 格式支援 payload：`[ACTION:NAME:PAYLOAD]`，向下相容無 payload 
 ### F6：工具擴充（MCP Tools）
 - 透過 OpenCode MCP 機制掛載外部工具
 - AI 自主判斷何時呼叫工具
+- 目前已掛載：`notebooklm-mcp`（Google NotebookLM 操作）
 
 ### F7：螢幕截圖分析（Screen Capture）
 ```
@@ -134,6 +135,21 @@ ACTION 格式支援 payload：`[ACTION:NAME:PAYLOAD]`，向下相容無 payload 
 - 暫停後前端顯示「恢復聆聽」浮動按鈕（解決語音無法恢復的矛盾）
 - 觸發詞：「安靜」「不要聽了」「暫停聆聽」
 - 由 Skill 驅動（`.opencode/skills/listen-control/SKILL.md`）
+
+### F12：NotebookLM 整合（MCP）
+```
+使用者: "幫我查筆記本裡關於 RAG 的內容"
+  → AI 呼叫 notebooklm_ask_question 工具
+  → MCP 透過 Chrome 自動化操作 NotebookLM
+  → Gemini 2.5 帶引用回覆
+  → AI 轉化為口語回覆
+```
+- 透過 OpenCode MCP 機制掛載 `notebooklm-mcp` 伺服器
+- Chrome 持久 Profile 保持 Google 登入狀態
+- 支援：筆記本問答、新增來源、產生 Podcast、管理筆記本
+- 由 Skill 驅動（`.opencode/skills/notebooklm/SKILL.md`）
+- 首次需執行 `setup_auth` 登入 Google（可見 Chrome 視窗）
+- `standard` profile：10 個工具，平衡功能與 context 消耗
 
 ### F10：Gateway 串流日誌（Streaming Logs）
 ```
@@ -546,8 +562,7 @@ Skills 是 Markdown 文件，定義 AI 在特定情境下的行為規則：
 ├── screenshot/SKILL.md        # 螢幕截圖 (SCREENSHOT)
 ├── youtube/SKILL.md           # YouTube 影片 (YOUTUBE/YOUTUBE_CLOSE)
 ├── session/SKILL.md           # 多會話管理 (NEW_SESSION/SESSION_PREV/NEXT)
-└── listen-control/SKILL.md   # 聆聽控制 (LISTEN_PAUSE/LISTEN_RESUME)
-```
+└── listen-control/SKILL.md   # 聆聽控制 (LISTEN_PAUSE/LISTEN_RESUME)└── notebooklm/SKILL.md       # NotebookLM 筆記本操作 (MCP 工具)```
 
 新增功能的步驟：
 1. 撰寫 `.opencode/skills/新功能/SKILL.md` — 定義 AI 行為
@@ -578,6 +593,7 @@ Skills 是 Markdown 文件，定義 AI 在特定情境下的行為規則：
 - [x] Gateway 串流日誌（完整 SSE 事件 + timing）
 - [x] Per-Session 獨立狀態（每個 session 獨立 UI 快照，覆蓋層暫停/恢復）
 - [x] 聆聽控制技能（AI 可暫停/恢復 VAD）
+- [x] NotebookLM 整合（MCP 工具，問答 + 來源管理 + Podcast 產生）
 - [ ] Session 持久化（SQLite，重啟保留歷史）
 - [ ] 語音快捷指令（自訂短語對應動作）
 - [ ] 喚醒詞 "Jarvis" 支援
