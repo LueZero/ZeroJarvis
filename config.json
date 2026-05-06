@@ -1,0 +1,35 @@
+{
+  "model": "github-copilot/claude-sonnet-4",
+  "$schema": "https://opencode.ai/config.json",
+  "agent": {
+    "build": {
+      "tools": {
+        "write": true,
+        "edit": true,
+        "bash": true,
+        "read": true,
+        "grep": true,
+        "glob": true,
+        "webfetch": true,
+        "websearch": true
+      },
+      "mode": "primary",
+      "permission": {
+        "edit": "allow",
+        "bash": "allow",
+        "read": "allow",
+        "grep": "allow",
+        "glob": "allow",
+        "webfetch": "allow",
+        "websearch": "allow"
+      },
+      "options": {}
+    }
+  },
+  "permission": {
+    "edit": "allow",
+    "bash": "allow",
+    "webfetch": "allow",
+    "websearch": "allow"
+  }
+}

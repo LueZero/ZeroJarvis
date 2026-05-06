@@ -1,0 +1,42 @@
+{
+  "$schema": "https://opencode.ai/config.schema.json",
+  "provider": {
+    "github-copilot": {}
+  },
+  "model": "github-copilot/claude-sonnet-4.6",
+  "permission": {
+    "edit": "allow",
+    "bash": "allow",
+    "webfetch": "allow",
+    "websearch": "allow"
+  },
+  "tools": {
+    "write": true,
+    "edit": true,
+    "bash": true,
+    "read": true,
+    "grep": true,
+    "glob": true,
+    "patch": true,
+    "webfetch": true,
+    "websearch": true,
+    "todowrite": true,
+    "skill": true,
+    "question": true
+  },
+  "instructions": [
+    ".opencode/instructions.md"
+  ],
+  "mcp": {
+    "notebooklm": {
+      "type": "local",
+      "command": ["npx", "notebooklm-mcp@latest"],
+      "enabled": true,
+      "environment": {
+        "HEADLESS": "true",
+        "NOTEBOOKLM_AI_MARKER": "false",
+        "NOTEBOOKLM_PROFILE": "standard"
+      }
+    }
+  }
+}
