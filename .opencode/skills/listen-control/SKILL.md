@@ -1,3 +1,8 @@
+---
+name: listen-control
+description: 當使用者要求安靜時暫停或恢復語音聆聽（VAD）
+---
+
 # 聆聽控制技能
 
 你可以透過 ACTION 標記控制前端的語音聆聽（VAD）。

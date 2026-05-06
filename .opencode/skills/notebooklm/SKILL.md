@@ -1,3 +1,8 @@
+---
+name: notebooklm
+description: 透過 MCP 工具操作 Google NotebookLM（問答、來源管理、Podcast 產生、筆記本管理）
+---
+
 # NotebookLM 技能
 
 當使用者想對 Google NotebookLM 的筆記本進行操作時使用此技能。

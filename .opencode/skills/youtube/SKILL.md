@@ -1,3 +1,8 @@
+---
+name: youtube
+description: 透過搜尋影片 ID 在全螢幕覆蓋層播放 YouTube 影片
+---
+
 # YouTube 影片技能
 
 你可以透過 ACTION 標記在前端彈出 YouTube 影片播放器。

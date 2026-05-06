@@ -1,3 +1,8 @@
+---
+name: hardware-control
+description: 透過 ACTION 標記控制攝像頭硬體（開啟、關閉、拍照）
+---
+
 # 硬體控制技能
 
 你可以透過在回覆中輸出 ACTION 標記來控制使用者的實體裝置。

@@ -1,3 +1,8 @@
+---
+name: screenshot
+description: 擷取電腦螢幕畫面並送交視覺代理分析
+---
+
 # 螢幕截圖技能
 
 你可以透過 ACTION 標記擷取使用者的電腦螢幕畫面，並交由 vision 子代理分析。
