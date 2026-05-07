@@ -95,6 +95,21 @@ export async function chatStream(
 
     log("LLM", `[${ts()}] Prompt → session ${sessionId.slice(0, 8)}: "${message.slice(0, 60)}"`);
 
+    // 0. Check if session is busy, abort if so
+    try {
+      const statusResult = await client.session.status() as any;
+      const statusData = statusResult?.data ?? statusResult;
+      const sessionStatus = statusData?.[sessionId];
+      if (sessionStatus?.type === "busy") {
+        log("LLM", `[${ts()}] Session busy, aborting...`);
+        await client.session.abort({ path: { id: sessionId } } as any);
+        // Brief wait for abort to take effect
+        await new Promise(r => setTimeout(r, 500));
+      }
+    } catch (statusErr: any) {
+      log("LLM", `[${ts()}] [WARN] Status check failed: ${statusErr.message}`);
+    }
+
     // 1. Subscribe to SSE events BEFORE triggering prompt
     const eventResult = await client.event.subscribe();
     const eventStream = eventResult.stream ?? eventResult;

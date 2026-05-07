@@ -22,7 +22,7 @@
     "websearch": true,
     "todowrite": true,
     "skill": true,
-    "question": true
+    "question": false
   },
   "instructions": [
     ".opencode/instructions.md"
