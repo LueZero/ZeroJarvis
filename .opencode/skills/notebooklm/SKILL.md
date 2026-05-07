@@ -136,35 +136,38 @@ chcp 65001 >nul && set "PATH=C:\Users\CIM\.local\bin;%PATH%" && notebooklm <comm
 
 ### Download（下載）
 
-所有 download 命令支援 `--all`、`--latest`、`--name "名稱"`、`-a <artifact_id>`、`--force`、`--dry-run`。
+**媒體類**（audio/video/slide-deck/infographic/report/mind-map/data-table）支援：`--latest`、`--all`、`--name "名稱"`、`-a <artifact_id>`、`--force`、`--dry-run`。
+
+**quiz/flashcards** 只支援：`-a <artifact_id>`、`--format json|markdown|html`。**沒有 `--latest`/`--all`。**
 
 > ⚠️ **強制規則：download 命令的輸出路徑是「必填參數」，必須使用 `files/notebooklm/<filename>` 格式。省略路徑 = 檔案存到錯誤位置。**
 
 **語法：** `notebooklm download <type> files/notebooklm/<filename> [options]`
 
-| 命令 | 輸出格式 | 說明 |
-|------|----------|------|
-| `download audio files/notebooklm/podcast.mp4` | .mp4 | 下載 Podcast |
-| `download video files/notebooklm/video.mp4` | .mp4 | 下載影片 |
-| `download slide-deck files/notebooklm/slides.pdf` | .pdf（預設）或 `--format pptx` | 下載簡報 |
-| `download infographic files/notebooklm/info.png` | .png | 下載資訊圖表 |
-| `download report files/notebooklm/report.md` | .md | 下載報告 Markdown |
-| `download mind-map files/notebooklm/mindmap.json` | .json | 下載心智圖 JSON |
-| `download data-table files/notebooklm/data.csv` | .csv | 下載表格 CSV |
-| `download quiz files/notebooklm/quiz.json` | `--format json\|markdown\|html` | 下載測驗 |
-| `download flashcards files/notebooklm/cards.json` | `--format json\|markdown\|html` | 下載學習卡 |
+| 命令 | 選項 | 說明 |
+|------|------|------|
+| `download audio files/notebooklm/podcast.mp4` | `--latest` | 下載 Podcast |
+| `download video files/notebooklm/video.mp4` | `--latest` | 下載影片 |
+| `download slide-deck files/notebooklm/slides.pdf` | `--latest --format pptx` | 下載簡報 |
+| `download infographic files/notebooklm/info.png` | `--latest` | 下載資訊圖表 |
+| `download report files/notebooklm/report.md` | `--latest` | 下載報告 |
+| `download mind-map files/notebooklm/mindmap.json` | `--latest` | 下載心智圖 |
+| `download data-table files/notebooklm/data.csv` | `--latest` | 下載表格 |
+| `download quiz files/notebooklm/quiz.json` | `--format json -a <id>` | 下載測驗 |
+| `download flashcards files/notebooklm/cards.json` | `--format json -a <id>` | 下載學習卡 |
 
 **命名規則**：`files/notebooklm/<type>-<YYYYMMDD>.<ext>`
 
 範例：
 ```powershell
-$env:Path = "C:\Users\CIM\.local\bin;$env:Path"; notebooklm download flashcards files/notebooklm/flashcards-20260507.json --format json --latest
+$env:Path = "C:\Users\CIM\.local\bin;$env:Path"; notebooklm download flashcards files/notebooklm/flashcards-20260507.json --format json -a <artifact_id>
 $env:Path = "C:\Users\CIM\.local\bin;$env:Path"; notebooklm download video files/notebooklm/video-20260507.mp4 --latest
-$env:Path = "C:\Users\CIM\.local\bin;$env:Path"; notebooklm download audio files/notebooklm/podcast-20260507.mp4 -a <artifact_id>
+$env:Path = "C:\Users\CIM\.local\bin;$env:Path"; notebooklm download quiz files/notebooklm/quiz-20260507.json --format json -a <artifact_id>
 ```
 
 ❌ **禁止（以下皆為錯誤用法）**：
-- `notebooklm download flashcards -a <id>`（缺少輸出路徑，CLI 會存到 CWD 根目錄）
+- `notebooklm download flashcards -a <id>`（缺少輸出路徑）
+- `notebooklm download quiz files/notebooklm/quiz.json --latest`（quiz 不支援 --latest）
 - `notebooklm download flashcards flashcards.json`（缺少 `files/notebooklm/` 前綴）
 
 ### Note（筆記）
@@ -258,6 +261,8 @@ $env:Path = "C:\Users\CIM\.local\bin;$env:Path"; notebooklm download audio files
 - `data` 中的雙引號必須轉義為 `\"`
 - 只有取得實際內容後才附 ACTION，不要在「開始產生」時附
 - 同時用口語告知使用者結果摘要（1-2 句），ACTION 只是額外的視覺呈現
+- **ACTION 標記必須放在回覆最末尾**，前面的口語部分先說完
+- **嚴禁在口語回覆中輸出 JSON 內容**。JSON 只能放在 ACTION 的 data 欄位中
 
 ---
 

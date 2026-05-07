@@ -130,13 +130,25 @@ export function handleWebSocket() {
 
           try {
             let fullText = "";
+            let suppressDelta = false; // Stop sending deltas once [ACTION: pattern starts
             await chatStream(
               msg.text,
               managedId,
               (delta) => {
                 fullText += delta;
-                if (sessionManager.getActiveId() === managedId) {
-                  send(ws, { type: "llm_delta", text: delta });
+                if (sessionManager.getActiveId() === managedId && !suppressDelta) {
+                  // Check if we've hit an ACTION tag in the accumulated text
+                  if (fullText.includes("[ACTION:")) {
+                    suppressDelta = true;
+                    // Send the clean part before ACTION (minus what was already sent)
+                    const actionIdx = fullText.indexOf("[ACTION:");
+                    const alreadySent = fullText.length - delta.length;
+                    if (actionIdx > alreadySent) {
+                      send(ws, { type: "llm_delta", text: delta.slice(0, actionIdx - alreadySent) });
+                    }
+                  } else {
+                    send(ws, { type: "llm_delta", text: delta });
+                  }
                 }
               },
               (text) => {
