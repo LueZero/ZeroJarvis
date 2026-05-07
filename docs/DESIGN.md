@@ -150,7 +150,7 @@ JSON payload（如 NOTEBOOK）使用 brace-counting 解析，不受巢狀 `]` �
 - 使用 `notebooklm-py` CLI（Python，透過 Google 內部 RPC API 直接呼叫）
 - 無需 Chrome 瀏覽器，純 HTTP 請求，速度快且穩定
 - 支援完整功能：筆記本 CRUD、問答、來源管理（URL/文字/檔案/AI 研究）、
-  內容產生（音訊/影片/簡報/測驗/閃卡/心智圖/報告/資訊圖表/資料表格）、
+  內容產生（音訊/影片/簡報/測驗/學習卡/心智圖/報告/資訊圖表/資料表格）、
   下載、筆記、分享、語言設定
 - 由 Skill 驅動（`.opencode/skills/notebooklm/SKILL.md`）
 - 首次需執行 `notebooklm login` 開瀏覽器登入 Google（一次性）
@@ -598,7 +598,7 @@ Skills 是 Markdown 文件，定義 AI 在特定情境下的行為規則：
 ├── listen-control/SKILL.md   # 聆聽控制 (LISTEN_PAUSE/LISTEN_RESUME)
 └── notebooklm/SKILL.md       # NotebookLM 完整操作 (NOTEBOOK/NOTEBOOK_CLOSE)
                                #   問答、來源、產生、下載、筆記、分享
-                               #   + 6 種 overlay 渲染（報告/心智圖/測驗/閃卡/媒體/表格）
+                               #   + 6 種 overlay 渲染（報告/心智圖/測驗/學習卡/媒體/表格）
 ```
 
 新增功能的步驟：

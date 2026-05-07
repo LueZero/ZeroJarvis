@@ -150,7 +150,7 @@
               </button>
             {/each}
           {:else}
-            <p class="error-text">無法解析閃卡資料</p>
+            <p class="error-text">無法解析學習卡資料</p>
           {/if}
         </div>
       </div>

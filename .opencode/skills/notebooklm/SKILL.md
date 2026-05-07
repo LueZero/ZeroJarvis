@@ -111,7 +111,7 @@ PowerShell：
 | `generate slide-deck "描述"` | `--format detailed\|presenter` `--length default\|short` | 簡報 |
 | `generate revise-slide "指示"` | `--artifact <id> --slide N`（N 從 0 起算） | 修改單張投影片 |
 | `generate quiz "描述"` | `--difficulty easy\|medium\|hard` `--quantity fewer\|standard\|more` | 測驗題 |
-| `generate flashcards "描述"` | `--difficulty easy\|medium\|hard` `--quantity fewer\|standard\|more` | 閃卡 |
+| `generate flashcards "描述"` | `--difficulty easy\|medium\|hard` `--quantity fewer\|standard\|more` | 學習卡 |
 | `generate infographic "描述"` | `--orientation landscape\|portrait\|square` `--detail concise\|standard\|detailed` `--style auto\|sketch-note\|professional\|bento-grid\|...` | 資訊圖表 |
 | `generate data-table "描述"` | — | 資料表格 |
 | `generate mind-map` | （同步，立即完成） | 心智圖 |
@@ -147,7 +147,7 @@ PowerShell：
 | `download mind-map files/notebooklm/mindmap.json` | .json | 下載心智圖 JSON |
 | `download data-table files/notebooklm/data.csv` | .csv | 下載表格 CSV |
 | `download quiz files/notebooklm/quiz.json` | `--format json\|markdown\|html` | 下載測驗 |
-| `download flashcards files/notebooklm/cards.json` | `--format json\|markdown\|html` | 下載閃卡 |
+| `download flashcards files/notebooklm/cards.json` | `--format json\|markdown\|html` | 下載學習卡 |
 
 **命名規則**：`<type>-<timestamp>.<ext>`，如 `report-20260507-143200.md`、`quiz-20260507-150000.json`
 
@@ -223,7 +223,7 @@ PowerShell：
 | 「產生學習指南/報告」 | generate report → download report → 讀取 .md | `markdown` |
 | 「產生心智圖」 | generate mind-map → download mind-map | `mindmap` |
 | 「出測驗題」 | generate quiz → download quiz --format json | `quiz` |
-| 「做閃卡」 | generate flashcards → download flashcards --format json | `flashcards` |
+| 「做學習卡」 | generate flashcards → download flashcards --format json | `flashcards` |
 | 「產生 Podcast/影片」 | generate audio/video → download → 取得檔案路徑 | `media` |
 | 「比較概念做表格」 | generate data-table → download data-table | `table` |
 | 「關閉顯示」 | — | 用 `[ACTION:NOTEBOOK_CLOSE]` |
@@ -258,7 +258,7 @@ PowerShell：
 - 「我的筆記本有哪些」→ `list`
 - 「切到 XX 筆記本」→ `use`
 - 「加到筆記本」→ `source add`
-- 「產生 Podcast / 影片 / 報告 / 測驗 / 閃卡 / 心智圖」→ `generate` 對應類型
+- 「產生 Podcast / 影片 / 報告 / 測驗 / 學習卡 / 心智圖」→ `generate` 對應類型
 - 「下載 XX」→ `download` 對應類型
 - 「幫我研究 XX 主題」→ `source add-research`
 - 「筆記本摘要」→ `summary`
