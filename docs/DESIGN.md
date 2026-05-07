@@ -24,6 +24,8 @@
 ```
 - 頁面載入自動開始聆聽（無需按鈕、無喚醒詞）
 - VAD (Silero) 偵測語音活動，無聲時 idle 待命
+- VAD 參數針對走動式使用優化（閾值 0.5、靜音容忍 900ms、minSpeech 250ms）
+- 常駐浮動麥克風按鈕 + 鍵盤 M 鍵可隨時暫停/恢復聆聽
 - STT 辨識後直接送入 OpenCode Agent
 - Agent 回覆嵌入 ACTION 標記控制硬體
 - TTS 串流語音回覆
@@ -132,10 +134,18 @@ JSON payload（如 NOTEBOOK）使用 brace-counting 解析，不受巢狀 `]` �
 ### F11：聆聽控制（Listen Control）
 ```
 使用者: "安靜一下" → AI 回覆 + [ACTION:LISTEN_PAUSE] → VAD 停止
-使用者: 點擊「恢復聆聽」浮動按鈕 → VAD 重啟
+使用者: 按 M 鍵 / 點擊浮動麥克風按鈕 → VAD 重啟
 ```
-- AI 可透過 ACTION 標記暫停/恢復 VAD 聆聽
-- 暫停後前端顯示「恢復聆聽」浮動按鈕（解決語音無法恢復的矛盾）
+- **統一控制入口 `toggleListening()`**：所有聆聽開關路徑共用同一函式
+- 觸發方式：
+  - 右下角常駐浮動麥克風按鈕（FAB，z-index 9999，覆蓋所有 overlay）
+  - 鍵盤快捷鍵 `M`（輸入框聚焦時不觸發）
+  - 選單「停止聆聽 / 開始聆聽」
+  - AI Skill `[ACTION:LISTEN_PAUSE]` / `[ACTION:LISTEN_RESUME]`
+- 暫停時：FAB 顯示紅色斜線麥克風、無脈動光效、header 隱藏綠色 mic-dot
+- 開啟時：FAB 顯示青色麥克風 + 脈動光暈
+- `submitUserSpeechOnPause: true`：暫停瞬間自動送出已錄音訊（不丟失語音）
+- 手機版 FAB 縮小至 48px，上移避開底部 UI
 - 觸發詞：「安靜」「不要聽了」「暫停聆聽」
 - 由 Skill 驅動（`.opencode/skills/listen-control/SKILL.md`）
 

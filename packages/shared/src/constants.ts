@@ -3,8 +3,10 @@ export const WS_PATH = "/ws";
 export const API_PREFIX = "/api";
 
 // VAD
-export const VAD_REDEMPTION_FRAMES = 8;           // ~480ms silence → end
-export const VAD_REDEMPTION_FRAMES_LONG = 24;     // ~1.5s for long speech
+export const VAD_POSITIVE_SPEECH_THRESHOLD = 0.5;  // speech detection sensitivity
+export const VAD_NEGATIVE_SPEECH_THRESHOLD = 0.28; // silence detection threshold
+export const VAD_REDEMPTION_MS = 900;              // ~900ms silence → end (tolerates walking pauses)
+export const VAD_REDEMPTION_MS_LONG = 1600;        // ~1.6s for long speech
 export const VAD_LONG_SPEECH_THRESHOLD_MS = 5000;  // switch to long mode after 5s
 
 // Audio

@@ -73,6 +73,19 @@
     };
   });
 
+  // Keyboard shortcut: M key toggles listening (unless typing in input)
+  $effect(() => {
+    function handleKeydown(e: KeyboardEvent) {
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+      if (e.key === "m" || e.key === "M") {
+        e.preventDefault();
+        toggleListening();
+      }
+    }
+    document.addEventListener("keydown", handleKeydown);
+    return () => document.removeEventListener("keydown", handleKeydown);
+  });
+
   async function autoStart() {
     try {
       if (!vadReady) {
@@ -117,7 +130,7 @@
           // Ensure VAD is stopped during AI speech
           stopVAD();
         }
-        if (msg.state === "idle" && listening && vadReady) {
+        if (msg.state === "idle" && listening && !listenPaused && vadReady) {
           // Only restart VAD on idle if NOT about to play audio
           // (tts_end will handle restart after audio playback)
           if (!isPlaying()) {
@@ -146,20 +159,19 @@
         audioPlaying = true;
         playAudio(msg.data).then(() => {
           audioPlaying = false;
-          // Audio finished playing — now safe to listen again
-          if (listening && vadReady) {
-            setState("idle");
+          // Audio finished — always go idle, only restart VAD if not paused
+          setState("idle");
+          setSttText("");
+          if (listening && !listenPaused && vadReady) {
             startVAD();
-            setSttText("");
           }
         }).catch((err) => {
           console.error("TTS playback failed:", err);
           audioPlaying = false;
-          // Recover from playback failure — restart listening
-          if (listening && vadReady) {
-            setState("idle");
+          setState("idle");
+          setSttText("");
+          if (listening && !listenPaused && vadReady) {
             startVAD();
-            setSttText("");
           }
         });
         break;
@@ -168,10 +180,10 @@
         // If audio already finished or failed, go idle immediately
         // If audio still playing, playAudio().then() will handle idle transition
         if (!audioPlaying && !isPlaying()) {
-          if (listening && vadReady) {
-            setState("idle");
+          setState("idle");
+          setSttText("");
+          if (listening && !listenPaused && vadReady) {
             startVAD();
-            setSttText("");
           }
         }
         break;
@@ -189,7 +201,7 @@
         break;
       case "error":
         setError(msg.message);
-        if (listening && vadReady) {
+        if (listening && !listenPaused && vadReady) {
           startVAD();
         }
         break;
@@ -249,10 +261,10 @@
         send({ type: "switch_session", sessionId: "__next__" } as any);
         break;
       case "LISTEN_PAUSE":
-        stopVAD();
-        listening = false;
-        listenPaused = true;
-        setState("idle");
+        toggleListening("off");
+        break;
+      case "LISTEN_RESUME":
+        toggleListening("on");
         break;
     }
   }
@@ -275,49 +287,63 @@
     }
   }
 
-  async function startListening() {
-    try {
-      // Unlock AudioContext during user gesture (required by browser autoplay policy)
-      await ensureAudioContext();
+  /** Unified listening control — single source of truth for all toggle paths */
+  async function toggleListening(forceState?: "on" | "off") {
+    const isOn = listening && !listenPaused;
+    const wantOn = forceState ? forceState === "on" : !isOn;
 
-      if (!vadReady) {
-        await initVAD({
-          onSpeechStart() {
-            setState("listening");
-            setSttText("聆聽中...");
-          },
-          onSpeechEnd(audio) {
-            console.log("HUD | speech ended, sending", audio.length, "samples to gateway");
-            stopVAD();
-            setState("thinking");
-            setSttText("辨識中...");
-            sendBinary(audio.buffer as ArrayBuffer);
-          },
-        });
-        vadReady = true;
+    if (wantOn) {
+      // === Turn ON ===
+      try {
+        await ensureAudioContext();
+        if (!vadReady) {
+          await initVAD({
+            onSpeechStart() {
+              setState("listening");
+              setSttText("聆聽中...");
+            },
+            onSpeechEnd(audio) {
+              console.log("HUD | speech ended, sending", audio.length, "samples to gateway");
+              stopVAD();
+              setState("thinking");
+              setSttText("辨識中...");
+              sendBinary(audio.buffer as ArrayBuffer);
+            },
+          });
+          vadReady = true;
+        }
+        startVAD();
+        listening = true;
+        listenPaused = false;
+        // Only set idle if not currently in thinking/speaking (AI may still be processing)
+        if (getState() === "listening" || getState() === "camera") {
+          setState("idle");
+        }
+      } catch (err: any) {
+        const msg = err?.name === "NotFoundError"
+          ? "找不到麥克風裝置"
+          : err?.name === "NotAllowedError"
+            ? "麥克風權限被拒絕"
+            : `麥克風初始化失敗: ${err?.message ?? err}`;
+        console.error("Mic init error:", err);
+        setError(msg);
       }
-
-      clearCurrent();
-      startVAD();
-      listening = true;
-      setState("listening");
-      menuOpen = false;
-    } catch (err: any) {
-      const msg = err?.name === "NotFoundError"
-        ? "找不到麥克風裝置"
-        : err?.name === "NotAllowedError"
-          ? "麥克風權限被拒絕"
-          : `麥克風初始化失敗: ${err?.message ?? err}`;
-      console.error("Mic init error:", err);
-      setError(msg);
+    } else {
+      // === Turn OFF ===
+      stopVAD();
+      listening = false;
+      listenPaused = true;
+      // Only reset to idle if currently listening; don't interrupt speaking/thinking state
+      if (getState() === "listening") {
+        setState("idle");
+      }
     }
+    menuOpen = false;
   }
 
-  function stopListening() {
-    stopVAD();
-    listening = false;
-    setState("idle");
-  }
+  // Legacy wrappers (used by autoStart and internal flows that need non-toggle behavior)
+  async function startListening() { await toggleListening("on"); }
+  function stopListening() { toggleListening("off"); }
 
   function handleInterrupt() {
     stopAudio();
@@ -408,9 +434,9 @@
       {#if menuOpen}
         <div class="menu-overlay" onclick={() => menuOpen = false}></div>
         <nav class="dropdown-menu">
-          <button class="menu-item" onclick={() => { listening ? stopListening() : startListening(); }}>
-            <span class="mi-icon">{listening ? '🔴' : '🎤'}</span>
-            <span>{listening ? '停止聆聽' : '開始聆聽'}</span>
+          <button class="menu-item" onclick={() => toggleListening()}>
+            <span class="mi-icon">{listening && !listenPaused ? '🔴' : '🎤'}</span>
+            <span>{listening && !listenPaused ? '停止聆聽 (M)' : '開始聆聽 (M)'}</span>
           </button>
           <button class="menu-item" onclick={toggleCamera}>
             <span class="mi-icon">📷</span>
@@ -493,12 +519,20 @@
   <!-- Session tabs (bottom bar, only shown when >1 session) -->
   <SessionTabs onSwitch={(id) => send({ type: 'switch_session', sessionId: id } as any)} />
 
-  <!-- Listen paused floating button -->
-  {#if listenPaused}
-    <button class="listen-resume-btn" onclick={() => { listenPaused = false; if (vadReady) { startVAD(); listening = true; } }}>
-      🎤 恢復聆聽
-    </button>
-  {/if}
+  <!-- Persistent floating mic toggle button (always visible for walk-around use) -->
+  <button
+    class="mic-fab"
+    class:mic-on={listening && !listenPaused}
+    class:mic-paused={listenPaused}
+    onclick={() => toggleListening()}
+    title={listening && !listenPaused ? "暫停收聽 (M)" : "開始收聽 (M)"}
+  >
+    {#if listening && !listenPaused}
+      <svg class="mic-fab-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z"/><path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/></svg>
+    {:else}
+      <svg class="mic-fab-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M19 11h-1.7c0 .74-.16 1.43-.43 2.05l1.23 1.23c.56-.98.9-2.09.9-3.28zm-4.02.17c0-.06.02-.11.02-.17V5c0-1.66-1.34-3-3-3S9 3.34 9 5v.18l5.98 5.99zM4.27 3L3 4.27l6.01 6.01V11c0 1.66 1.33 3 2.99 3 .22 0 .44-.03.65-.08l1.66 1.66c-.71.33-1.5.52-2.31.52-2.76 0-5.3-2.1-5.3-5.1H5c0 3.41 2.72 6.23 6 6.72V21h2v-3.28c.91-.13 1.77-.45 2.55-.9l4.17 4.18L21 19.73 4.27 3z"/></svg>
+    {/if}
+  </button>
 </div>
 
 <style>
@@ -991,34 +1025,71 @@
     }
   }
 
-  /* Listen paused floating button */
-  .listen-resume-btn {
+  /* === Persistent Floating Mic FAB === */
+  .mic-fab {
     position: fixed;
-    bottom: 100px;
-    left: 50%;
-    transform: translateX(-50%);
-    z-index: 1000;
-    padding: 14px 28px;
-    border-radius: 30px;
-    border: 1px solid rgba(0, 212, 255, 0.6);
-    background: rgba(0, 20, 40, 0.9);
-    color: #00d4ff;
-    font-size: 1rem;
-    font-weight: 600;
+    bottom: 32px;
+    right: 24px;
+    z-index: 9999;
+    width: 64px;
+    height: 64px;
+    border-radius: 50%;
+    border: 2px solid rgba(100, 100, 120, 0.5);
+    background: rgba(30, 30, 50, 0.92);
+    color: rgba(200, 200, 220, 0.7);
     cursor: pointer;
-    backdrop-filter: blur(10px);
-    box-shadow: 0 0 20px rgba(0, 212, 255, 0.3), inset 0 0 10px rgba(0, 212, 255, 0.1);
-    animation: pulse-listen 2s ease-in-out infinite;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    backdrop-filter: blur(12px);
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+    transition: all 0.25s ease;
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
   }
 
-  .listen-resume-btn:hover {
-    background: rgba(0, 40, 60, 0.95);
-    box-shadow: 0 0 30px rgba(0, 212, 255, 0.5);
+  .hud.has-tabs .mic-fab {
+    bottom: 56px;
   }
 
-  @keyframes pulse-listen {
-    0%, 100% { box-shadow: 0 0 20px rgba(0, 212, 255, 0.3); }
-    50% { box-shadow: 0 0 30px rgba(0, 212, 255, 0.6); }
+  .mic-fab:active {
+    transform: scale(0.92);
+  }
+
+  .mic-fab.mic-on {
+    border-color: rgba(0, 212, 255, 0.7);
+    background: rgba(0, 30, 50, 0.92);
+    color: #00d4ff;
+    box-shadow: 0 0 20px rgba(0, 212, 255, 0.3), 0 4px 20px rgba(0, 0, 0, 0.4);
+    animation: mic-fab-pulse 2s ease-in-out infinite;
+  }
+
+  .mic-fab.mic-paused {
+    border-color: rgba(255, 85, 119, 0.5);
+    color: rgba(255, 85, 119, 0.8);
+  }
+
+  .mic-fab-icon {
+    width: 28px;
+    height: 28px;
+  }
+
+  @keyframes mic-fab-pulse {
+    0%, 100% { box-shadow: 0 0 20px rgba(0, 212, 255, 0.3), 0 4px 20px rgba(0, 0, 0, 0.4); }
+    50% { box-shadow: 0 0 35px rgba(0, 212, 255, 0.5), 0 4px 20px rgba(0, 0, 0, 0.4); }
+  }
+
+  @media (max-width: 600px) {
+    .mic-fab {
+      width: 48px;
+      height: 48px;
+      bottom: 80px;
+      right: 12px;
+    }
+    .mic-fab-icon {
+      width: 22px;
+      height: 22px;
+    }
   }
 
   /* Chat input bar — same position as subtitle */

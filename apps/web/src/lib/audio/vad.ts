@@ -4,8 +4,10 @@
  */
 
 import {
-  VAD_REDEMPTION_FRAMES,
-  VAD_REDEMPTION_FRAMES_LONG,
+  VAD_POSITIVE_SPEECH_THRESHOLD,
+  VAD_NEGATIVE_SPEECH_THRESHOLD,
+  VAD_REDEMPTION_MS,
+  VAD_REDEMPTION_MS_LONG,
   VAD_LONG_SPEECH_THRESHOLD_MS,
 } from "@zerojarvis/shared";
 
@@ -24,10 +26,11 @@ export async function initVAD(callbacks: VADCallbacks) {
   console.log("VAD | creating MicVAD instance...");
 
   vadInstance = await MicVAD.new({
-    positiveSpeechThreshold: 0.6,
-    negativeSpeechThreshold: 0.3,
-    minSpeechFrames: 3,
-    redemptionFrames: VAD_REDEMPTION_FRAMES,
+    positiveSpeechThreshold: VAD_POSITIVE_SPEECH_THRESHOLD,
+    negativeSpeechThreshold: VAD_NEGATIVE_SPEECH_THRESHOLD,
+    minSpeechMs: 250,
+    redemptionMs: VAD_REDEMPTION_MS,
+    submitUserSpeechOnPause: true,
 
     // Serve ONNX/WASM assets from /static to avoid Vite bundling issues
     modelURL: "/silero_vad_legacy.onnx",
@@ -46,16 +49,16 @@ export async function initVAD(callbacks: VADCallbacks) {
       setTimeout(() => {
         if (vadInstance && Date.now() - speechStartTime >= VAD_LONG_SPEECH_THRESHOLD_MS) {
           // Extend silence tolerance for long speech
-          vadInstance.options.redemptionFrames = VAD_REDEMPTION_FRAMES_LONG;
+          vadInstance.setOptions({ redemptionMs: VAD_REDEMPTION_MS_LONG });
         }
       }, VAD_LONG_SPEECH_THRESHOLD_MS);
     },
 
     onSpeechEnd: (audio: Float32Array) => {
       console.log("VAD | 🔇 speech ended, audio length:", audio.length);
-      // Reset to default redemption frames
+      // Reset to default redemption
       if (vadInstance) {
-        vadInstance.options.redemptionFrames = VAD_REDEMPTION_FRAMES;
+        vadInstance.setOptions({ redemptionMs: VAD_REDEMPTION_MS });
       }
       callbacks.onSpeechEnd(audio);
     },
