@@ -12,16 +12,19 @@ description: 透過 notebooklm CLI（notebooklm-py）操作 Google NotebookLM �
 
 ## 環境設定（每次呼叫必備）
 
-```bash
-chcp 65001 >nul && set "PATH=C:\Users\CIM\.local\bin;%PATH%" && notebooklm <command>
-```
-
-PowerShell：
+PowerShell（推薦）：
 ```powershell
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8; $env:Path = "C:\Users\CIM\.local\bin;$env:Path"; notebooklm <command>
 ```
 
-**必須在同一行**設定 PATH 並執行指令。
+CMD：
+```bash
+chcp 65001 >nul && set "PATH=C:\Users\CIM\.local\bin;%PATH%" && notebooklm <command>
+```
+
+**必須在同一行**設定 PATH 再執行指令。
+
+> ⚠️ download 命令必須使用**絕對路徑** `D:\ZeroJarvis\files\notebooklm\<filename>`，不依賴 CWD。
 
 ---
 
@@ -135,7 +138,9 @@ PowerShell：
 
 所有 download 命令支援 `--all`、`--latest`、`--name "名稱"`、`-a <artifact_id>`、`--force`、`--dry-run`。
 
-**重要：所有下載檔案統一存放在 `files/notebooklm/` 目錄。**
+> ⚠️ **強制規則：download 命令的輸出路徑是「必填參數」，必須使用 `files/notebooklm/<filename>` 格式。省略路徑 = 檔案存到錯誤位置。**
+
+**語法：** `notebooklm download <type> files/notebooklm/<filename> [options]`
 
 | 命令 | 輸出格式 | 說明 |
 |------|----------|------|
@@ -149,7 +154,18 @@ PowerShell：
 | `download quiz files/notebooklm/quiz.json` | `--format json\|markdown\|html` | 下載測驗 |
 | `download flashcards files/notebooklm/cards.json` | `--format json\|markdown\|html` | 下載學習卡 |
 
-**命名規則**：`<type>-<timestamp>.<ext>`，如 `report-20260507-143200.md`、`quiz-20260507-150000.json`
+**命名規則**：`files/notebooklm/<type>-<YYYYMMDD>.<ext>`
+
+範例：
+```powershell
+$env:Path = "C:\Users\CIM\.local\bin;$env:Path"; notebooklm download flashcards files/notebooklm/flashcards-20260507.json --format json --latest
+$env:Path = "C:\Users\CIM\.local\bin;$env:Path"; notebooklm download video files/notebooklm/video-20260507.mp4 --latest
+$env:Path = "C:\Users\CIM\.local\bin;$env:Path"; notebooklm download audio files/notebooklm/podcast-20260507.mp4 -a <artifact_id>
+```
+
+❌ **禁止（以下皆為錯誤用法）**：
+- `notebooklm download flashcards -a <id>`（缺少輸出路徑，CLI 會存到 CWD 根目錄）
+- `notebooklm download flashcards flashcards.json`（缺少 `files/notebooklm/` 前綴）
 
 ### Note（筆記）
 

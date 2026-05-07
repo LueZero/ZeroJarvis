@@ -6,13 +6,17 @@
 
 import { getClient } from "../llm/client.js";
 import { writeFile, mkdir } from "node:fs/promises";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 export interface VisionResult {
   text: string;
 }
 
-const CAPTURES_DIR = join(process.cwd(), "files", "captures");
+// Anchor to project root (services/gateway/src/vision/ → 4 levels up)
+const __filename = fileURLToPath(import.meta.url);
+const PROJECT_ROOT = resolve(__filename, "..", "..", "..", "..", "..");
+const CAPTURES_DIR = join(PROJECT_ROOT, "files", "captures");
 
 /**
  * Save captured image to disk for reference/debugging.

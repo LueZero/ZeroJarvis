@@ -76,3 +76,22 @@ permission:
 3. 依照載入的指令執行，輸出正確的 ACTION 標記
 4. 回覆要口語化、精簡
 
+## 檔案路徑規則（強制）
+
+所有產生的檔案必須存放在 `files/` 目錄下。
+
+| 類型 | 路徑 |
+|------|------|
+| NotebookLM 下載 | `files/notebooklm/<type>-<YYYYMMDD>.<ext>` |
+| 攝像頭/螢幕截圖 | `files/captures/capture-<timestamp>.jpg` |
+
+### notebooklm download 的路徑是必填參數
+
+`notebooklm download <type>` 後面必須接輸出路徑，不可省略：
+
+```
+✅ notebooklm download flashcards files/notebooklm/flashcards.json --format json --latest
+✅ notebooklm download audio files/notebooklm/podcast.mp4 --latest
+❌ notebooklm download flashcards -a <id>          ← 缺少路徑，會存到根目錄
+❌ notebooklm download flashcards flashcards.json   ← 缺少 files/ 前綴
+```

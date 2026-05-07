@@ -5,10 +5,10 @@ use std::io::Cursor;
 use std::fs;
 use std::path::PathBuf;
 
-/// Get the .captures directory (project root)
+/// Get the files/captures directory (project root)
 fn captures_dir() -> PathBuf {
-    let mut dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    let captures = dir.join(".captures");
+    let dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let captures = dir.join("files").join("captures");
     if !captures.exists() {
         let _ = fs::create_dir_all(&captures);
     }
@@ -32,7 +32,7 @@ fn capture_screen() -> Result<String, String> {
 
     let jpeg_bytes = buf.into_inner();
 
-    // Save to .captures/ directory
+    // Save to files/captures/ directory
     let timestamp = chrono::Local::now().format("%Y%m%d_%H%M%S").to_string();
     let file_path = captures_dir().join(format!("screen_{}.jpg", timestamp));
     let _ = fs::write(&file_path, &jpeg_bytes);
