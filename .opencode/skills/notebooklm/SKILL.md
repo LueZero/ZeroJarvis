@@ -135,17 +135,21 @@ PowerShell：
 
 所有 download 命令支援 `--all`、`--latest`、`--name "名稱"`、`-a <artifact_id>`、`--force`、`--dry-run`。
 
+**重要：所有下載檔案統一存放在 `files/notebooklm/` 目錄。**
+
 | 命令 | 輸出格式 | 說明 |
 |------|----------|------|
-| `download audio [path]` | .mp4 | 下載 Podcast |
-| `download video [path]` | .mp4 | 下載影片 |
-| `download slide-deck [path]` | .pdf（預設）或 `--format pptx` | 下載簡報 |
-| `download infographic [path]` | .png | 下載資訊圖表 |
-| `download report [path]` | .md | 下載報告 Markdown |
-| `download mind-map [path]` | .json | 下載心智圖 JSON |
-| `download data-table [path]` | .csv | 下載表格 CSV |
-| `download quiz [path]` | `--format json\|markdown\|html` | 下載測驗 |
-| `download flashcards [path]` | `--format json\|markdown\|html` | 下載閃卡 |
+| `download audio files/notebooklm/podcast.mp4` | .mp4 | 下載 Podcast |
+| `download video files/notebooklm/video.mp4` | .mp4 | 下載影片 |
+| `download slide-deck files/notebooklm/slides.pdf` | .pdf（預設）或 `--format pptx` | 下載簡報 |
+| `download infographic files/notebooklm/info.png` | .png | 下載資訊圖表 |
+| `download report files/notebooklm/report.md` | .md | 下載報告 Markdown |
+| `download mind-map files/notebooklm/mindmap.json` | .json | 下載心智圖 JSON |
+| `download data-table files/notebooklm/data.csv` | .csv | 下載表格 CSV |
+| `download quiz files/notebooklm/quiz.json` | `--format json\|markdown\|html` | 下載測驗 |
+| `download flashcards files/notebooklm/cards.json` | `--format json\|markdown\|html` | 下載閃卡 |
+
+**命名規則**：`<type>-<timestamp>.<ext>`，如 `report-20260507-143200.md`、`quiz-20260507-150000.json`
 
 ### Note（筆記）
 

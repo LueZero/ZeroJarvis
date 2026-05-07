@@ -1,6 +1,6 @@
 /**
  * Vision Processor via OpenCode SDK
- * Saves captured image to .captures/ for reference, then sends to
+ * Saves captured image to files/captures/ for reference, then sends to
  * a dedicated OpenCode session with the user's spoken query.
  */
 
@@ -12,7 +12,7 @@ export interface VisionResult {
   text: string;
 }
 
-const CAPTURES_DIR = join(process.cwd(), ".captures");
+const CAPTURES_DIR = join(process.cwd(), "files", "captures");
 
 /**
  * Save captured image to disk for reference/debugging.

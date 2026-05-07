@@ -288,7 +288,7 @@ JSON payload（如 NOTEBOOK）使用 brace-counting 解析，不受巢狀 `]` �
      │ ws: { type: "image", data, query }
      ▼
 [Gateway: processVision]
-     │ 1. 儲存圖片到 .captures/
+     │ 1. 儲存圖片到 files/captures/
      │ 2. 建立 vision 專用 session
      │ 3. 送 FilePartInput (data:image/jpeg;base64,...)
      │ 4. 訂閱 events 取得回覆
@@ -526,6 +526,14 @@ zerojarvis/
 │           │   └── manager.ts       # Session 管理
 │           └── ws/
 │               └── handler.ts       # WebSocket 訊息路由
+├── files/                           # 產生的檔案（git-ignored 內容）
+│   ├── captures/                    # 攝像頭截圖 (.jpg)
+│   └── notebooklm/                  # NotebookLM CLI 下載
+│       ├── report-*.md
+│       ├── quiz-*.json
+│       ├── mindmap-*.json
+│       ├── podcast-*.mp4
+│       └── ...
 └── packages/
     └── shared/                      # 共用型別 + 常數
         └── src/
