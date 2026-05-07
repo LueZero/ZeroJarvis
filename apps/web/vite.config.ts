@@ -53,6 +53,9 @@ export default defineConfig({
       "/api": {
         target: "http://localhost:3100",
       },
+      "/files": {
+        target: "http://localhost:3100",
+      },
     },
   },
 });

@@ -156,15 +156,28 @@
       </div>
 
     {:else if content.type === "media"}
+      {@const filePath = content.data.trim()}
+      {@const isVideo = /\.(mp4|webm|mov)$/i.test(filePath)}
+      {@const isAudio = /\.(mp3|wav|ogg|m4a)$/i.test(filePath)}
+      {@const mediaUrl = filePath.startsWith("http") ? filePath : `/${filePath}`}
       <div class="content-scroll">
         <div class="media-content">
-          <div class="media-icon">
-            <svg width="64" height="64" viewBox="0 0 24 24" fill="none">
-              <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-            </svg>
-          </div>
-          <div class="media-info">{content.data}</div>
-          <div class="media-hint">檔案已產生完成</div>
+          {#if isVideo}
+            <!-- svelte-ignore a11y_media_has_caption -->
+            <video class="media-player" controls autoplay src={mediaUrl}>
+              <track kind="captions" />
+            </video>
+          {:else if isAudio}
+            <audio class="media-player" controls autoplay src={mediaUrl}></audio>
+          {:else}
+            <div class="media-icon">
+              <svg width="64" height="64" viewBox="0 0 24 24" fill="none">
+                <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </div>
+            <div class="media-info">{content.data}</div>
+          {/if}
+          <div class="media-hint">{content.title}</div>
         </div>
       </div>
 
@@ -555,6 +568,19 @@
     font-size: 0.7rem;
     color: rgba(255, 255, 255, 0.35);
     letter-spacing: 0.1em;
+  }
+
+  .media-player {
+    width: 100%;
+    max-width: 800px;
+    max-height: 70vh;
+    border-radius: 8px;
+    outline: 1px solid rgba(0, 212, 255, 0.2);
+  }
+
+  audio.media-player {
+    width: 100%;
+    max-width: 500px;
   }
 
   /* --- Table --- */

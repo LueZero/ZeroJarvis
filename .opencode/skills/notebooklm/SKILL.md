@@ -253,7 +253,7 @@ $env:Path = "C:\Users\CIM\.local\bin;$env:Path"; notebooklm download quiz files/
 - `mindmap`：JSON 字串 `{"label":"根節點","children":[{"label":"子節點","children":[]}]}`
 - `quiz`：JSON 陣列 `[{"question":"題目","options":["A","B","C","D"],"correct":0,"rationale":"解說"}]`
 - `flashcards`：JSON 陣列 `[{"front":"正面","back":"背面"}]`
-- `media`：檔案路徑或描述文字（如 `"./podcast.mp4 已下載完成"`）
+- `media`：檔案相對路徑（如 `files/notebooklm/video-20260507.mp4`），前端會自動嵌入播放器
 - `table`：CSV 字串（含表頭行）
 
 ### 重要

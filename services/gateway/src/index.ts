@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
+import { resolve, join } from "node:path";
 import { GATEWAY_PORT, API_PREFIX, WS_PATH } from "@zerojarvis/shared";
 import { handleWebSocket } from "./ws/handler.js";
 import { log } from "./logger.js";
@@ -8,6 +9,23 @@ const app = new Hono();
 
 // CORS for web client
 app.use("*", cors({ origin: "*" }));
+
+// Static file serving for files/ directory (video, audio, downloads)
+// Gateway CWD = services/gateway/, project root = ../../
+const filesRoot = resolve(process.cwd(), "..", "..", "files");
+app.get("/files/*", async (c) => {
+  const reqPath = c.req.path.replace(/^\/files\//, "");
+  // Security: prevent path traversal
+  if (reqPath.includes("..") || reqPath.startsWith("/")) {
+    return c.text("Forbidden", 403);
+  }
+  const filePath = join(filesRoot, reqPath);
+  const file = Bun.file(filePath);
+  if (await file.exists()) {
+    return new Response(file);
+  }
+  return c.text("Not Found", 404);
+});
 
 // Health check
 app.get(`${API_PREFIX}/health`, (c) => {
