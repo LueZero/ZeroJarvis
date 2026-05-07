@@ -134,43 +134,55 @@ export async function chatStream(
         const evtSessionId = props.sessionID ?? props.part?.sessionID;
         if (evtSessionId && evtSessionId !== sessionId) continue;
 
-        // Handle message.part.updated (the primary streaming event)
+        // ── message.part.delta: incremental text/reasoning streaming ──
+        if (evt.type === "message.part.delta") {
+          const delta = props.delta ?? "";
+          const partType = props.part?.type ?? props.type;
+          const evtPartSessionId = props.part?.sessionID ?? props.sessionID;
+          if (evtPartSessionId && evtPartSessionId !== sessionId) continue;
+
+          if (partType === "reasoning") {
+            reasoningText += delta;
+            if (reasoningText.length <= 30 || reasoningText.length % 200 < (delta.length + 5)) {
+              log("LLM", `[${ts()}] [REASONING] (+${delta.length}) (${reasoningText.length} total) "${reasoningText.slice(-100)}"`);
+            }
+          } else {
+            // Default: text delta
+            // Skip user echo
+            if (delta.trim() === message.trim()) continue;
+            fullText += delta;
+            onDelta(delta);
+            if (fullText.length <= 30 || fullText.length % 200 < (delta.length + 5)) {
+              log("LLM", `[${ts()}] [TEXT] (+${delta.length}) (${fullText.length} total) "${fullText.slice(-80)}"`);
+            }
+          }
+          continue;
+        }
+
+        // ── message.part.updated: structural part snapshots ──
         if (evt.type === "message.part.updated") {
           const part = props.part;
           if (!part) continue;
 
-          // Text streaming — prefer delta if available, fallback to diff
+          // Text snapshot — sync fullText if delta missed something
           if (part.type === "text") {
             const newText = part.text ?? "";
-            // Skip user's own message echo (OpenCode replays input as a text event)
+            // Skip user's own message echo
             if (newText.trim() === message.trim()) continue;
-            // Use delta from properties if available (SDK v1.14.33+)
-            if (props.delta) {
+            if (newText.length > fullText.length) {
+              const missed = newText.slice(fullText.length);
               fullText = newText;
-              onDelta(props.delta);
-            } else {
-              // Fallback: detect new message part (assistant response starts fresh)
-              if (newText.length < fullText.length) {
-                fullText = "";
-              }
-              if (newText.length > fullText.length) {
-                const delta = newText.slice(fullText.length);
-                fullText = newText;
-                onDelta(delta);
-              }
-            }
-            // Log periodically
-            if (fullText.length > 0 && (fullText.length <= 20 || fullText.length % 200 < 20)) {
-              log("LLM", `[${ts()}] [TEXT] (${fullText.length} chars) "${fullText.slice(-80)}"`);
+              onDelta(missed);
+              log("LLM", `[${ts()}] [TEXT:SYNC] (+${missed.length}) (${fullText.length} total)`);
             }
           }
 
-          // Reasoning / thinking content (type: "reasoning")
+          // Reasoning snapshot
           if (part.type === "reasoning") {
             const text = part.text ?? "";
             if (text.length > reasoningText.length) {
               reasoningText = text;
-              log("LLM", `[${ts()}] [REASONING] (${reasoningText.length} chars) "${reasoningText.slice(-100)}"`);
+              log("LLM", `[${ts()}] [REASONING:SYNC] (${reasoningText.length} total)`);
             }
           }
 
@@ -210,6 +222,7 @@ export async function chatStream(
             const cost = part.cost ?? 0;
             log("LLM", `[${ts()}] [STEP:FINISH] reason=${part.reason ?? "?"} cost=$${cost.toFixed(4)} tokens=[in:${tokens?.input ?? 0} out:${tokens?.output ?? 0} reasoning:${tokens?.reasoning ?? 0} cache_r:${tokens?.cache?.read ?? 0} cache_w:${tokens?.cache?.write ?? 0}]`);
           }
+          continue;
         }
 
         if (evt.type === "session.idle") {
@@ -225,7 +238,7 @@ export async function chatStream(
         }
 
         // Log other event types (skip high-frequency ones)
-        if (evt.type !== "message.part.updated" && evt.type !== "message.updated") {
+        if (evt.type !== "message.updated") {
           log("LLM", `[${ts()}] [EVENT] ${evt.type}`);
         }
       }
