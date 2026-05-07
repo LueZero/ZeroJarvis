@@ -382,7 +382,11 @@
   }
 </script>
 
-<div class="hud" class:has-tabs={getSessions().length > 1}>
+<div class="hud" class:has-tabs={getSessions().length > 1} class:ai-speaking={getState() === "speaking"} class:user-speaking={getState() === "listening"}>
+  <!-- Edge glow -->
+  <div class="edge-glow"></div>
+  <!-- Grid lines -->
+  <div class="grid-overlay"></div>
   <!-- Header -->
   <header class="hud-header">
     <div class="brand">
@@ -516,10 +520,143 @@
     overflow: hidden;
     width: 100%;
     max-width: 100vw;
+    transition: box-shadow 0.5s ease;
   }
 
   .hud.has-tabs {
     padding-bottom: 48px;
+  }
+
+  /* === Grid Overlay (sci-fi wireframe) === */
+  .grid-overlay {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 1;
+    background:
+      /* Vertical lines */
+      repeating-linear-gradient(
+        90deg,
+        rgba(0, 212, 255, 0.07) 0px,
+        rgba(0, 212, 255, 0.07) 1px,
+        transparent 1px,
+        transparent 80px
+      ),
+      /* Horizontal lines */
+      repeating-linear-gradient(
+        0deg,
+        rgba(0, 212, 255, 0.07) 0px,
+        rgba(0, 212, 255, 0.07) 1px,
+        transparent 1px,
+        transparent 80px
+      );
+    mask-image: radial-gradient(ellipse at 50% 50%, black 30%, transparent 90%);
+    -webkit-mask-image: radial-gradient(ellipse at 50% 50%, black 30%, transparent 90%);
+  }
+
+  /* === Edge Glow === */
+  .edge-glow {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 100;
+    opacity: 0;
+    transition: opacity 0.4s ease;
+    box-shadow:
+      inset 0 0 30px rgba(0, 212, 255, 0.2),
+      inset 0 0 60px rgba(0, 212, 255, 0.08),
+      0 0 20px rgba(0, 212, 255, 0.1);
+  }
+
+  /* AI Speaking: cyan glow pulse */
+  .hud.ai-speaking .edge-glow {
+    opacity: 1;
+    animation: glow-ai 1.2s ease-in-out infinite;
+  }
+
+  /* User Speaking: purple vibrate glow */
+  .hud.user-speaking .edge-glow {
+    opacity: 1;
+    animation: glow-user 0.4s ease-in-out infinite;
+  }
+
+  /* Also light up the grid when speaking */
+  .hud.ai-speaking .grid-overlay {
+    background:
+      repeating-linear-gradient(
+        90deg,
+        rgba(0, 212, 255, 0.05) 0px,
+        rgba(0, 212, 255, 0.05) 1px,
+        transparent 1px,
+        transparent 80px
+      ),
+      repeating-linear-gradient(
+        0deg,
+        rgba(0, 212, 255, 0.05) 0px,
+        rgba(0, 212, 255, 0.05) 1px,
+        transparent 1px,
+        transparent 80px
+      );
+    animation: grid-pulse-ai 2s ease-in-out infinite;
+  }
+
+  .hud.user-speaking .grid-overlay {
+    background:
+      repeating-linear-gradient(
+        90deg,
+        rgba(123, 97, 255, 0.05) 0px,
+        rgba(123, 97, 255, 0.05) 1px,
+        transparent 1px,
+        transparent 80px
+      ),
+      repeating-linear-gradient(
+        0deg,
+        rgba(123, 97, 255, 0.05) 0px,
+        rgba(123, 97, 255, 0.05) 1px,
+        transparent 1px,
+        transparent 80px
+      );
+    animation: grid-pulse-user 0.8s ease-in-out infinite;
+  }
+
+  @keyframes glow-ai {
+    0%, 100% {
+      box-shadow:
+        inset 0 0 25px rgba(0, 212, 255, 0.15),
+        inset 0 0 50px rgba(0, 212, 255, 0.06),
+        0 0 15px rgba(0, 212, 255, 0.08);
+    }
+    50% {
+      box-shadow:
+        inset 0 0 45px rgba(0, 212, 255, 0.3),
+        inset 0 0 80px rgba(0, 212, 255, 0.12),
+        0 0 35px rgba(0, 212, 255, 0.18);
+    }
+  }
+
+  @keyframes glow-user {
+    0%, 100% {
+      box-shadow:
+        inset 0 0 20px rgba(123, 97, 255, 0.2),
+        inset 0 0 45px rgba(123, 97, 255, 0.08),
+        0 0 12px rgba(123, 97, 255, 0.1);
+    }
+    50% {
+      box-shadow:
+        inset 0 0 50px rgba(123, 97, 255, 0.38),
+        inset 0 0 90px rgba(123, 97, 255, 0.15),
+        0 0 40px rgba(123, 97, 255, 0.22);
+    }
+  }
+
+  @keyframes grid-pulse-ai {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.6; }
+  }
+
+  @keyframes grid-pulse-user {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
   }
 
   /* Header */
