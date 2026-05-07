@@ -6,7 +6,6 @@
   import Subtitle from "./Subtitle.svelte";
   import CameraPreview from "./CameraPreview.svelte";
   import MapOverlay from "./MapOverlay.svelte";
-  import YouTubeOverlay from "./YouTubeOverlay.svelte";
   import NotebookOverlay from "./NotebookOverlay.svelte";
   import SessionTabs from "./SessionTabs.svelte";
   import {
@@ -24,9 +23,6 @@
     getMapQuery,
     setMapQuery,
     clearMapQuery,
-    getYoutubeVideoId,
-    setYoutubeVideoId,
-    clearYoutubeVideoId,
     getNotebookContent,
     setNotebookContent,
     clearNotebookContent,
@@ -231,12 +227,6 @@
         break;
       case "MAP_CLOSE":
         clearMapQuery();
-        break;
-      case "YOUTUBE":
-        if (payload) setYoutubeVideoId(payload);
-        break;
-      case "YOUTUBE_CLOSE":
-        clearYoutubeVideoId();
         break;
       case "NOTEBOOK":
         if (payload) {
@@ -483,11 +473,6 @@
   <!-- Map overlay (triggered by [ACTION:MAP:query]) -->
   {#if getMapQuery()}
     <MapOverlay query={getMapQuery()} onClose={clearMapQuery} />
-  {/if}
-
-  <!-- YouTube overlay (triggered by [ACTION:YOUTUBE:videoId]) -->
-  {#if getYoutubeVideoId()}
-    <YouTubeOverlay videoId={getYoutubeVideoId()} onClose={clearYoutubeVideoId} />
   {/if}
 
   <!-- NotebookLM overlay (triggered by [ACTION:NOTEBOOK:json]) -->

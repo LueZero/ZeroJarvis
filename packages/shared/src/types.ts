@@ -103,7 +103,6 @@ export interface SessionSnapshot {
   agentState: AgentState;
   cameraOn: boolean;
   mapQuery: string;
-  youtubeVideoId: string;
   notebookContent: NotebookContent | null;
   error: string | null;
 }

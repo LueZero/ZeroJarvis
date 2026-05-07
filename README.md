@@ -14,7 +14,6 @@
 - **視覺分析** — 攝像頭截圖送 Vision Agent 分析
 - **螢幕截圖** — Desktop 原生截圖 / Web getDisplayMedia，送 AI 分析
 - **地圖功能** — AI 推薦地點後自動彈出 Google Maps
-- **YouTube 影片** — AI websearch 推薦影片，全螢幕嵌入播放
 - **串流日誌** — Gateway 終端機即時顯示 AI 處理過程、工具呼叫、耗時統計
 - **Skill 系統** — AI 行為由 Skill 文件驅動，易於擴充
 - **ACTION 標記** — AI 主動控制前端（攝像頭、地圖等）
@@ -105,7 +104,6 @@ ZeroJarvis/
 │       ├── hardware-control/  # 攝像頭控制技能
 │       ├── food-map/          # 地圖導航技能
 │       ├── screenshot/        # 螢幕截圖技能
-│       ├── youtube/           # YouTube 影片技能
 │       ├── session/           # 多會話管理技能
 │       ├── listen-control/    # 聆聽控制技能
 │       └── notebooklm/        # NotebookLM 筆記本 (CLI)
@@ -136,8 +134,6 @@ AI 透過在回覆中嵌入 ACTION 標記來控制前端，標記會被自動移
 | `[ACTION:SCREENSHOT]` | 擷取電腦螢幕送視覺分析 |
 | `[ACTION:MAP:搜尋詞]` | 彈出 Google Maps |
 | `[ACTION:MAP_CLOSE]` | 關閉地圖 |
-| `[ACTION:YOUTUBE:影片ID]` | 彈出 YouTube 播放器 |
-| `[ACTION:YOUTUBE_CLOSE]` | 關閉影片 |
 | `[ACTION:NEW_SESSION]` | 建立新對話 |
 | `[ACTION:SESSION_PREV]` | 切到上一個對話 |
 | `[ACTION:SESSION_NEXT]` | 切到下一個對話 |
@@ -159,7 +155,6 @@ Skills 是 Markdown 文件，定義 AI 在特定情境下的行為規則：
 ├── hardware-control/SKILL.md  # 教 AI 何時開相機、拍照
 ├── food-map/SKILL.md          # 教 AI 何時顯示地圖
 ├── screenshot/SKILL.md        # 教 AI 何時截取螢幕
-├── youtube/SKILL.md           # 教 AI 何時播放 YouTube 影片
 ├── session/SKILL.md           # 教 AI 何時切換/建立對話
 ├── listen-control/SKILL.md   # 教 AI 何時暫停/恢復聆聽
 └── notebooklm/SKILL.md       # 教 AI 何時查詢 NotebookLM（bash CLI）
@@ -172,7 +167,7 @@ Skills 是 Markdown 文件，定義 AI 在特定情境下的行為規則：
 - OpenCode 使用 **Session** 管理對話歷史
 - 支援**多會話平行處理** — 第一個還在處理時可開新對話
 - **Per-Session 獨立狀態** — 每個 session 擁有獨立的 UI 快照，切換不會混亂
-- **覆蓋層暫停/恢復** — 切走時攝像頭/地圖/YouTube 暫停隱藏，切回恢復
+- **覆蓋層暫停/恢復** — 切走時攝像頭/地圖暫停隱藏，切回恢復
 - **全 Skill 驅動** — 「新對話」「上一個」「下一個」等指令由 AI 透過 session Skill 判斷
 - **聆聽控制** — 浮動麥克風按鈕 / M 鍵 / AI ACTION 統一控制暫停/恢復，暫停瞬間自動送出已錄音訊
 - 底部 tab 列顯示所有 session 狀態（⏳ / ✅ / ❌）
@@ -198,7 +193,6 @@ Skills 是 Markdown 文件，定義 AI 在特定情境下的行為規則：
 | HUD (預設) | 波形動畫 + 浮動字幕 + 自動聆聽 |
 | 攝像頭 | 全螢幕滑入 + 科幻 HUD + 掃描線 |
 | 地圖 | 全螢幕 Google Maps + 科幻框架 |
-| YouTube | 全螢幕嵌入式播放器 + 紅色 HUD |
 | Session Tabs | 底部 tab 列顯示所有平行會話狀態 |
 
 ## 開發

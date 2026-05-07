@@ -15,7 +15,6 @@ export interface ManagedSession {
   sttText: string;                   // STT text at time of switch
   cameraOn: boolean;
   mapQuery: string;
-  youtubeVideoId: string;
   notebookContent: NotebookContent | null;
   error: string | null;
   createdAt: number;
@@ -37,7 +36,6 @@ export function createSession(title?: string): ManagedSession {
     sttText: "",
     cameraOn: false,
     mapQuery: "",
-    youtubeVideoId: "",
     notebookContent: null,
     error: null,
     createdAt: Date.now(),
@@ -128,7 +126,6 @@ export function getSnapshot(id: string): SessionSnapshot | null {
     agentState: session.agentState,
     cameraOn: session.cameraOn,
     mapQuery: session.mapQuery,
-    youtubeVideoId: session.youtubeVideoId,
     notebookContent: session.notebookContent,
     error: session.error,
   };

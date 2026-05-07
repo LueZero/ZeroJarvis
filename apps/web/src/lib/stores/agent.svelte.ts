@@ -17,7 +17,6 @@ interface SessionState {
   llmText: string;
   cameraOn: boolean;
   mapQuery: string;
-  youtubeVideoId: string;
   notebookContent: NotebookContent | null;
   error: string | null;
   messages: ChatMessage[];
@@ -30,7 +29,6 @@ let currentPolish = $state<PolishResult | null>(null);
 let currentLlmText = $state("");
 let isCameraOn = $state(false);
 let mapQuery = $state("");
-let youtubeVideoId = $state("");
 let notebookContent = $state<NotebookContent | null>(null);
 let error = $state<string | null>(null);
 let messages = $state<ChatMessage[]>([]);
@@ -54,7 +52,6 @@ function saveCurrentToMap(sessionId: string) {
     llmText: currentLlmText,
     cameraOn: isCameraOn,
     mapQuery,
-    youtubeVideoId,
     notebookContent,
     error,
     messages,
@@ -71,7 +68,6 @@ function loadFromMap(sessionId: string) {
     currentLlmText = stored.llmText;
     isCameraOn = stored.cameraOn;
     mapQuery = stored.mapQuery;
-    youtubeVideoId = stored.youtubeVideoId;
     notebookContent = stored.notebookContent;
     error = stored.error;
     messages = stored.messages;
@@ -84,7 +80,6 @@ function loadFromMap(sessionId: string) {
     currentLlmText = "";
     isCameraOn = false;
     mapQuery = "";
-    youtubeVideoId = "";
     notebookContent = null;
     error = null;
     messages = [];
@@ -122,10 +117,6 @@ export function getCameraOn(): boolean {
 
 export function getMapQuery(): string {
   return mapQuery;
-}
-
-export function getYoutubeVideoId(): string {
-  return youtubeVideoId;
 }
 
 export function getNotebookContent(): NotebookContent | null {
@@ -171,14 +162,6 @@ export function setMapQuery(q: string) {
 
 export function clearMapQuery() {
   mapQuery = "";
-}
-
-export function setYoutubeVideoId(id: string) {
-  youtubeVideoId = id;
-}
-
-export function clearYoutubeVideoId() {
-  youtubeVideoId = "";
 }
 
 export function setNotebookContent(c: NotebookContent | null) {
@@ -247,7 +230,6 @@ export function switchSession(sessionId: string, snapshot: SessionSnapshot) {
     currentLlmText = snapshot.llmText;
     isCameraOn = snapshot.cameraOn;
     mapQuery = snapshot.mapQuery;
-    youtubeVideoId = snapshot.youtubeVideoId;
     notebookContent = snapshot.notebookContent;
     error = snapshot.error;
     messages = [];
@@ -282,7 +264,6 @@ export function getActiveSnapshot(): SessionSnapshot {
     agentState,
     cameraOn: isCameraOn,
     mapQuery,
-    youtubeVideoId,
     notebookContent,
     error,
   };

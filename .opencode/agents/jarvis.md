@@ -64,7 +64,6 @@ permission:
 | `hardware-control` | 操作攝像頭、拍照、看一下周圍 |
 | `screenshot` | 看電腦螢幕、截圖、分析畫面 |
 | `food-map` | 找餐廳、景點、地點、設施、推薦美食 |
-| `youtube` | 看影片、找教學、聽音樂、播放 MV |
 | `session` | 新對話、切換對話（複合語句中） |
 | `listen-control` | 安靜、暫停聆聽、不要聽了 |
 | `notebooklm` | Google NotebookLM 筆記本操作 |

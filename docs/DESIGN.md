@@ -60,8 +60,6 @@ AI 回覆中嵌入控制標記，由 Gateway 解析後轉發前端：
 | `[ACTION:SCREENSHOT]` | 擷取電腦螢幕送 Vision Agent |
 | `[ACTION:MAP:搜尋詞]` | 彈出 Google Maps 地圖 |
 | `[ACTION:MAP_CLOSE]` | 關閉地圖 |
-| `[ACTION:YOUTUBE:影片ID]` | 彈出 YouTube 影片播放器 |
-| `[ACTION:YOUTUBE_CLOSE]` | 關閉影片播放器 |
 | `[ACTION:NOTEBOOK:{json}]` | 彈出 NotebookLM 內容覆蓋（報告/測驗/心智圖等） |
 | `[ACTION:NOTEBOOK_CLOSE]` | 關閉 NotebookLM 覆蓋 |
 | `[ACTION:NEW_SESSION]` | 建立新對話（當前保留背景） |
@@ -102,19 +100,6 @@ JSON payload（如 NOTEBOOK）使用 brace-counting 解析，不受巢狀 `]` �
 - Desktop 模式零延遲（Rust xcap 原生 API，不需用戶確認）
 - Web 模式觸發系統畫面分享對話框
 
-### F8：YouTube 影片播放（YouTube Overlay）
-```
-使用者: "推薦一個 Svelte 教學影片"
-  → AI 用 websearch 搜尋 site:youtube.com Svelte tutorial
-  → 取得影片 ID + 簡短介紹
-  → [ACTION:YOUTUBE:xxxxxxxxxxx]
-  → 前端彈出全螢幕 YouTube 嵌入式播放器
-```
-- 由 Skill 驅動（`.opencode/skills/youtube/SKILL.md`）
-- AI 必須透過 websearch 確認影片存在，不可編造 ID
-- 科幻 HUD 風格（紅色主題，與 Map 的藍色區分）
-- 語音說「關掉影片」→ `[ACTION:YOUTUBE_CLOSE]`
-
 ### F9：多會話管理（Multi-Session）
 ```
 使用者: "新對話" → 建立新 session（上一個繼續背景處理）
@@ -125,7 +110,7 @@ JSON payload（如 NOTEBOOK）使用 brace-counting 解析，不受巢狀 `]` �
 - 無上限平行會話，每個 session 獨立 OpenCode session ID
 - **Per-Session 獨立狀態**：每個 session 擁有獨立的 UI 狀態（LLM 文字、STT、覆蓋層、錯誤）
 - 底部 tab 列顯示所有 session 狀態（⏳ processing / ✅ done / ❌ error）
-- **覆蓋層暫停/恢復**：切走時攝像頭/地圖/YouTube 暫停隱藏（不釋放資源），切回時恢復
+- **覆蓋層暫停/恢復**：切走時攝像頭/地圖暫停隱藏（不釋放資源），切回時恢復
 - **全 Skill 驅動**：所有 session 指令由 AI 透過 session 技能判斷並輸出 ACTION 標記
 - 背景 session 完成時 tab 閃爍通知
 - Vision 仍使用獨立臨時會話（不受多會話系統影響）
@@ -187,7 +172,7 @@ JSON payload（如 NOTEBOOK）使用 brace-counting 解析，不受巢狀 `]` �
 ### F10：Gateway 串流日誌（Streaming Logs）
 ```
 [14:32:05.123] [EVENT] message.part.updated — "好的，讓我幫你查一下..."
-[14:32:05.456] [TOOL:CALL] websearch("site:youtube.com Svelte tutorial")
+[14:32:05.456] [TOOL:CALL] websearch("附近日式料理")
 [14:32:07.890] [TOOL:DONE] websearch → 3 results (2434ms)
 [14:32:08.100] [EVENT] session.idle
 [TIMING] stt=320ms polish=150ms llm=4200ms tts=800ms total=5470ms
@@ -506,7 +491,6 @@ zerojarvis/
 │   │   │   │   │   ├── Subtitle.svelte     # 字幕 (玻璃面板)
 │   │   │   │   │   ├── CameraPreview.svelte # 攝像頭預覽 (科幻 HUD)
 │   │   │   │   │   ├── MapOverlay.svelte    # 地圖覆蓋 (科幻 HUD)
-│   │   │   │   │   ├── YouTubeOverlay.svelte # YouTube 影片播放器
 │   │   │   │   │   ├── NotebookOverlay.svelte # NotebookLM 內容顯示 (6 種渲染)
 │   │   │   │   │   ├── SessionTabs.svelte   # 多會話底部 tab 列 (F9)
 │   │   │   │   │   └── ConfirmPanel.svelte  # 確認面板
@@ -603,7 +587,6 @@ Skills 是 Markdown 文件，定義 AI 在特定情境下的行為規則：
 ├── hardware-control/SKILL.md  # 攝像頭控制 (CAMERA_ON/OFF/CAPTURE)
 ├── food-map/SKILL.md          # 地圖導航 (MAP/MAP_CLOSE)
 ├── screenshot/SKILL.md        # 螢幕截圖 (SCREENSHOT)
-├── youtube/SKILL.md           # YouTube 影片 (YOUTUBE/YOUTUBE_CLOSE)
 ├── session/SKILL.md           # 多會話管理 (NEW_SESSION/SESSION_PREV/NEXT)
 ├── listen-control/SKILL.md   # 聆聽控制 (LISTEN_PAUSE/LISTEN_RESUME)
 └── notebooklm/SKILL.md       # NotebookLM 完整操作 (NOTEBOOK/NOTEBOOK_CLOSE)
@@ -635,7 +618,6 @@ Skills 是 Markdown 文件，定義 AI 在特定情境下的行為規則：
 ## 13. 未來規劃
 
 - [x] 螢幕截圖分析（Tauri 系統截圖 + Web getDisplayMedia）
-- [x] YouTube 影片播放（AI websearch 找影片 ID + 嵌入播放器）
 - [x] 多會話管理（平行對話 + 語音切換 + 底部 tab 列）
 - [x] Gateway 串流日誌（完整 SSE 事件 + timing）
 - [x] Per-Session 獨立狀態（每個 session 獨立 UI 快照，覆蓋層暫停/恢復）
