@@ -7,6 +7,7 @@
   import CameraPreview from "./CameraPreview.svelte";
   import MapOverlay from "./MapOverlay.svelte";
   import YouTubeOverlay from "./YouTubeOverlay.svelte";
+  import NotebookOverlay from "./NotebookOverlay.svelte";
   import SessionTabs from "./SessionTabs.svelte";
   import {
     getState,
@@ -26,6 +27,9 @@
     getYoutubeVideoId,
     setYoutubeVideoId,
     clearYoutubeVideoId,
+    getNotebookContent,
+    setNotebookContent,
+    clearNotebookContent,
     setSessions,
     getSessions,
     switchSession,
@@ -221,6 +225,14 @@
         break;
       case "YOUTUBE_CLOSE":
         clearYoutubeVideoId();
+        break;
+      case "NOTEBOOK":
+        if (payload) {
+          try { setNotebookContent(JSON.parse(payload)); } catch {}
+        }
+        break;
+      case "NOTEBOOK_CLOSE":
+        clearNotebookContent();
         break;
       case "SCREENSHOT":
         triggerScreenshot();
@@ -451,6 +463,11 @@
   <!-- YouTube overlay (triggered by [ACTION:YOUTUBE:videoId]) -->
   {#if getYoutubeVideoId()}
     <YouTubeOverlay videoId={getYoutubeVideoId()} onClose={clearYoutubeVideoId} />
+  {/if}
+
+  <!-- NotebookLM overlay (triggered by [ACTION:NOTEBOOK:json]) -->
+  {#if getNotebookContent()}
+    <NotebookOverlay content={getNotebookContent()!} onClose={clearNotebookContent} />
   {/if}
 
   <!-- Subtitle overlay (bottom, does not push layout) -->

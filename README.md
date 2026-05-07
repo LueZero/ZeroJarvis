@@ -17,7 +17,7 @@
 - **串流日誌** — Gateway 終端機即時顯示 AI 處理過程、工具呼叫、耗時統計
 - **Skill 系統** — AI 行為由 Skill 文件驅動，易於擴充
 - **ACTION 標記** — AI 主動控制前端（攝像頭、地圖等）
-- **NotebookLM 整合** — 透過 MCP 操作 Google NotebookLM（問答、Podcast 產生）
+- **NotebookLM 整合** — 透過 notebooklm-py 操作 Google NotebookLM（問答、Podcast 產生）
 - **對話記憶** — OpenCode Session 持久化，AI 記得上下文
 
 ## 快速開始
@@ -28,6 +28,7 @@
 - [pnpm](https://pnpm.io/) >= 9
 - [Bun](https://bun.sh/) >= 1.1 (Gateway server)
 - [OpenCode](https://opencode.ai/) (LLM Agent Server)
+- [uv](https://docs.astral.sh/uv/) (Python 套件管理，NotebookLM 需要)
 - [Rust](https://rustup.rs/) (Desktop 版需要，Web 版不需要)
 
 ### 安裝
@@ -40,6 +41,12 @@ cd ZeroJarvis
 # 安裝依賴
 pnpm install
 
+# 安裝 notebooklm-py（NotebookLM 整合）
+irm https://astral.sh/uv/install.ps1 | iex   # 安裝 uv (Python 管理)
+uv tool install "notebooklm-py[browser]"     # 安裝 notebooklm CLI
+uv tool run playwright install chromium      # 安裝 Chromium (登入用)
+notebooklm login                             # Google 登入 (一次性)
+
 # 設定環境變數
 cp .env.example .env
 # 編輯 .env 填入你的 GROQ_API_KEY
@@ -51,6 +58,7 @@ cp .env.example .env
 |------|------|----------|
 | Groq | STT (Whisper) | [console.groq.com/keys](https://console.groq.com/keys) (免費) |
 | OpenCode | LLM Agent | 安裝 [opencode](https://opencode.ai/) 並設定 provider |
+| notebooklm-py | NotebookLM 查詢 | `notebooklm login` 登入 Google (免費) |
 
 ### 啟動
 
@@ -97,7 +105,9 @@ ZeroJarvis/
 │       ├── food-map/          # 地圖導航技能
 │       ├── screenshot/        # 螢幕截圖技能
 │       ├── youtube/           # YouTube 影片技能
-│       └── notebooklm/        # NotebookLM 筆記本 (MCP)
+│       ├── session/           # 多會話管理技能
+│       ├── listen-control/    # 聆聽控制技能
+│       └── notebooklm/        # NotebookLM 筆記本 (CLI)
 ├── start.bat / start.ps1           # Web 版啟動
 ├── start-desktop.bat / .ps1        # Desktop 版啟動
 └── docs/DESIGN.md       # 完整設計文件
@@ -151,7 +161,7 @@ Skills 是 Markdown 文件，定義 AI 在特定情境下的行為規則：
 ├── youtube/SKILL.md           # 教 AI 何時播放 YouTube 影片
 ├── session/SKILL.md           # 教 AI 何時切換/建立對話
 ├── listen-control/SKILL.md   # 教 AI 何時暫停/恢復聆聽
-└── notebooklm/SKILL.md       # 教 AI 何時操作 NotebookLM 筆記本
+└── notebooklm/SKILL.md       # 教 AI 何時查詢 NotebookLM（bash CLI）
 ```
 
 新增功能只需撰寫新的 Skill 文件 + 對應的前端 ACTION handler。
@@ -221,71 +231,59 @@ TTS_VOICE=zh-TW-HsiaoChenNeural  # 可選：TTS 語音
 OPENCODE_URL=http://localhost:4096 # 可選：OpenCode 位址
 ```
 
-## NotebookLM 整合（MCP）
+## NotebookLM 整合（notebooklm-py）
 
-透過 [notebooklm-mcp](https://github.com/PleasePrompto/notebooklm-mcp) 讓 Jarvis 可直接操作 Google NotebookLM。
+透過 [notebooklm-py](https://github.com/teng-lin/notebooklm-py) 讓 Jarvis 可直接查詢 Google NotebookLM 筆記本內容。使用 Google 內部 RPC API，不需要 Chrome 自動化，速度快且穩定。
 
 ### 功能
 
 - **問答** — 對筆記本內容提問，取得帶引用的 Gemini 2.5 回覆
-- **來源管理** — 新增 URL 或文字到筆記本
-- **Podcast 產生** — 產生 Audio Overview（雙人對話摘要）
-- **筆記本管理** — 列出、搜尋、切換筆記本
+- **來源管理** — 新增 URL、文字、檔案到筆記本
+- **內容產生** — Podcast、影片、投影片、測驗、心智圖等
+- **筆記本管理** — 列出、建立、切換筆記本
 
-### 首次設定（認證）
+### 安裝與認證
 
 ```bash
-# 方法一：跟 Jarvis 說「登入 NotebookLM」
-# → AI 會呼叫 setup_auth 工具，Chrome 視窗彈出讓你登入 Google
+# 1. 安裝 uv (如尚未安裝)
+irm https://astral.sh/uv/install.ps1 | iex
 
-# 方法二：手動執行（HEADLESS=false 才能看到登入視窗）
-set HEADLESS=false
-npx notebooklm-mcp@latest
-# → 等待 MCP 啟動後，透過 MCP client 呼叫 setup_auth
+# 2. 安裝 notebooklm-py
+uv tool install "notebooklm-py[browser]"
+
+# 3. 安裝 Chromium (登入用，僅首次需要)
+uv tool run playwright install chromium
+
+# 4. Google 登入 (開瀏覽器，僅首次需要)
+$env:Path = "C:\Users\$env:USERNAME\.local\bin;$env:Path"
+notebooklm login
+
+# 5. 驗證認證
+notebooklm auth check --test
+notebooklm list
 ```
 
-登入成功後 Cookie 保存在 `%LOCALAPPDATA%\notebooklm-mcp\Data\chrome_profile\`，後續自動登入。
+登入成功後 Cookie 保存在 `~/.notebooklm/storage_state.json`，後續全部是純 HTTP 呼叫。
 
 ### 注意事項
 
 | 項目 | 說明 |
 |------|------|
-| 首次認證 | 必須先登入 Google，否則所有工具回報認證失敗 |
-| 回應延遲 | `ask_question` 約 10-30 秒（Chrome 自動化 + Gemini 回覆） |
-| Podcast 耗時 | `generate_audio` 約 3-10 分鐘（NotebookLM 背景處理） |
-| Context 消耗 | `standard` profile 註冊 10 個工具，佔一定 token |
-| Chrome 佔用 | MCP 在背景運行 headless Chrome，佔約 200-400MB RAM |
-| Windows 限制 | 完全支援，Chrome profile 路徑為 `%LOCALAPPDATA%\notebooklm-mcp\` |
-| Cookie 過期 | 如認證失效，跟 Jarvis 說「重新登入 NotebookLM」即可 |
-
-### 設定位置
-
-`opencode.json` 中的 `mcp.notebooklm` 區塊：
-```json
-"mcp": {
-  "notebooklm": {
-    "type": "local",
-    "command": ["npx", "notebooklm-mcp@latest"],
-    "enabled": true,
-    "environment": {
-      "HEADLESS": "true",
-      "NOTEBOOKLM_AI_MARKER": "false",
-      "NOTEBOOKLM_PROFILE": "standard"
-    }
-  }
-}
-```
+| 首次認證 | 執行 `notebooklm login` 開瀏覽器登入 Google |
+| 回應速度 | `notebooklm ask` 約 3-10 秒（純 API，無 Chrome） |
+| Podcast 耗時 | `notebooklm generate audio` 約 3-10 分鐘 |
+| Cookie 過期 | 約 1-2 週後需重新 `notebooklm login` |
+| 無需 Chrome | 除了 login 外，所有操作純 HTTP，不佔 RAM |
 
 ### 語音觸發範例
 
 | 語音指令 | AI 行為 |
 |---------|---------|
-| 「幫我查筆記本裡關於 X 的內容」 | `ask_question` |
-| 「我有哪些筆記本」 | `list_notebooks` |
-| 「切到 XX 筆記本」 | `select_notebook` |
-| 「把這個網址加到筆記本」 | `add_source` |
-| 「產生 Podcast」 | `generate_audio` |
-| 「建一個新筆記本」 | `add_notebook` |
+| 「幫我查筆記本裡關於 X 的內容」 | `notebooklm ask` |
+| 「我有哪些筆記本」 | `notebooklm list` |
+| 「切到 XX 筆記本」 | `notebooklm use <id>` |
+| 「把這個網址加到筆記本」 | `notebooklm source add` |
+| 「產生 Podcast」 | `notebooklm generate audio` |
 
 ## 疑難排解
 

@@ -27,16 +27,63 @@ function ts(): string {
 }
 
 /** Parse action markers from LLM response and return clean text + actions.
- *  Handles both plain [ACTION:X] and [ACTION:X:PAYLOAD] with optional backticks. */
+ *  Handles both plain [ACTION:X] and [ACTION:X:PAYLOAD] with optional backticks.
+ *  For JSON payloads (starting with {), uses brace-counting to handle nested brackets. */
 export function parseActions(text: string): { cleanText: string; actions: { action: string; payload?: string }[] } {
-  const actionRegex = /`?\[ACTION:([A-Z_]+)(?::([^\]]*))?\]`?/g;
   const actions: { action: string; payload?: string }[] = [];
-  let match;
-  while ((match = actionRegex.exec(text)) !== null) {
-    actions.push({ action: match[1], payload: match[2] || undefined });
+  const spans: [number, number][] = []; // regions to remove from text
+
+  const prefix = /`?\[ACTION:([A-Z_]+)(?::)?/g;
+  let m;
+  while ((m = prefix.exec(text)) !== null) {
+    const actionName = m[1];
+    const afterPrefix = m.index + m[0].length;
+
+    // No payload — expect immediate ]
+    if (text[afterPrefix - 1] !== ':' || text[afterPrefix] === ']') {
+      const end = text.indexOf(']', afterPrefix);
+      if (end === -1) continue;
+      const endPos = text[end + 1] === '`' ? end + 2 : end + 1;
+      actions.push({ action: actionName, payload: undefined });
+      spans.push([m.index, endPos]);
+      continue;
+    }
+
+    // Has payload — check if JSON (starts with {)
+    if (text[afterPrefix] === '{') {
+      // Brace-counting to find matching end
+      let depth = 0;
+      let i = afterPrefix;
+      for (; i < text.length; i++) {
+        if (text[i] === '{') depth++;
+        else if (text[i] === '}') { depth--; if (depth === 0) break; }
+      }
+      if (depth !== 0) continue; // malformed
+      const payload = text.slice(afterPrefix, i + 1);
+      // Expect ] after the JSON
+      const afterJson = i + 1;
+      const closeBracket = text.indexOf(']', afterJson);
+      if (closeBracket === -1) continue;
+      const endPos = text[closeBracket + 1] === '`' ? closeBracket + 2 : closeBracket + 1;
+      actions.push({ action: actionName, payload });
+      spans.push([m.index, endPos]);
+    } else {
+      // Simple payload — find next ]
+      const end = text.indexOf(']', afterPrefix);
+      if (end === -1) continue;
+      const payload = text.slice(afterPrefix, end);
+      const endPos = text[end + 1] === '`' ? end + 2 : end + 1;
+      actions.push({ action: actionName, payload });
+      spans.push([m.index, endPos]);
+    }
   }
-  const cleanText = text.replace(actionRegex, "").trim();
-  return { cleanText, actions };
+
+  // Remove action spans from text (reverse order to preserve indices)
+  let cleanText = text;
+  for (let i = spans.length - 1; i >= 0; i--) {
+    cleanText = cleanText.slice(0, spans[i][0]) + cleanText.slice(spans[i][1]);
+  }
+  return { cleanText: cleanText.trim(), actions };
 }
 
 /** Map of managedSessionId → OpenCode sessionId */

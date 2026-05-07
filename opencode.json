@@ -26,18 +26,5 @@
   },
   "instructions": [
     ".opencode/instructions.md"
-  ],
-  "mcp": {
-    "notebooklm": {
-      "type": "local",
-      "command": ["npx", "-y", "notebooklm-mcp@latest"],
-      "enabled": true,
-      "timeout": 30000,
-      "environment": {
-        "HEADLESS": "true",
-        "NOTEBOOKLM_AI_MARKER": "false",
-        "NOTEBOOKLM_PROFILE": "full"
-      }
-    }
-  }
+  ]
 }

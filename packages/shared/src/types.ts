@@ -104,6 +104,7 @@ export interface SessionSnapshot {
   cameraOn: boolean;
   mapQuery: string;
   youtubeVideoId: string;
+  notebookContent: NotebookContent | null;
   error: string | null;
 }
 
@@ -126,3 +127,12 @@ export const DEFAULT_CONFIG: UserConfig = {
   visionModel: "openai/gpt-4o",
   language: "zh-TW",
 };
+
+// --- NotebookLM Content Display ---
+export type NotebookContentType = "markdown" | "mindmap" | "quiz" | "flashcards" | "media" | "table";
+
+export interface NotebookContent {
+  type: NotebookContentType;
+  title: string;
+  data: string;
+}

@@ -7,7 +7,7 @@
  * On switch: save current $state → Map, load target Map → $state.
  */
 
-import type { AgentState, PolishResult, ChatMessage, SessionTab, SessionSnapshot } from "@zerojarvis/shared";
+import type { AgentState, PolishResult, ChatMessage, SessionTab, SessionSnapshot, NotebookContent } from "@zerojarvis/shared";
 
 // --- Per-Session Snapshot (stored for inactive sessions) ---
 interface SessionState {
@@ -18,6 +18,7 @@ interface SessionState {
   cameraOn: boolean;
   mapQuery: string;
   youtubeVideoId: string;
+  notebookContent: NotebookContent | null;
   error: string | null;
   messages: ChatMessage[];
 }
@@ -30,6 +31,7 @@ let currentLlmText = $state("");
 let isCameraOn = $state(false);
 let mapQuery = $state("");
 let youtubeVideoId = $state("");
+let notebookContent = $state<NotebookContent | null>(null);
 let error = $state<string | null>(null);
 let messages = $state<ChatMessage[]>([]);
 
@@ -53,6 +55,7 @@ function saveCurrentToMap(sessionId: string) {
     cameraOn: isCameraOn,
     mapQuery,
     youtubeVideoId,
+    notebookContent,
     error,
     messages,
   });
@@ -69,6 +72,7 @@ function loadFromMap(sessionId: string) {
     isCameraOn = stored.cameraOn;
     mapQuery = stored.mapQuery;
     youtubeVideoId = stored.youtubeVideoId;
+    notebookContent = stored.notebookContent;
     error = stored.error;
     messages = stored.messages;
     inactiveStates.delete(sessionId);
@@ -81,6 +85,7 @@ function loadFromMap(sessionId: string) {
     isCameraOn = false;
     mapQuery = "";
     youtubeVideoId = "";
+    notebookContent = null;
     error = null;
     messages = [];
   }
@@ -121,6 +126,10 @@ export function getMapQuery(): string {
 
 export function getYoutubeVideoId(): string {
   return youtubeVideoId;
+}
+
+export function getNotebookContent(): NotebookContent | null {
+  return notebookContent;
 }
 
 export function getError(): string | null {
@@ -170,6 +179,14 @@ export function setYoutubeVideoId(id: string) {
 
 export function clearYoutubeVideoId() {
   youtubeVideoId = "";
+}
+
+export function setNotebookContent(c: NotebookContent | null) {
+  notebookContent = c;
+}
+
+export function clearNotebookContent() {
+  notebookContent = null;
 }
 
 export function setError(e: string | null) {
@@ -231,6 +248,7 @@ export function switchSession(sessionId: string, snapshot: SessionSnapshot) {
     isCameraOn = snapshot.cameraOn;
     mapQuery = snapshot.mapQuery;
     youtubeVideoId = snapshot.youtubeVideoId;
+    notebookContent = snapshot.notebookContent;
     error = snapshot.error;
     messages = [];
   }
@@ -265,6 +283,7 @@ export function getActiveSnapshot(): SessionSnapshot {
     cameraOn: isCameraOn,
     mapQuery,
     youtubeVideoId,
+    notebookContent,
     error,
   };
 }

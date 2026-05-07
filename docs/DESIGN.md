@@ -1,7 +1,7 @@
 # ZeroJarvis — Jarvis 語音個人助理設計文件
 
-> **版本**：0.4.0  
-> **日期**：2026-05-06  
+> **版本**：0.5.0  
+> **日期**：2026-05-07  
 > **代號**：ZeroJarvis (零代理 — 零打字互動)
 
 ---
@@ -12,7 +12,7 @@
 - **語音輸入** → STT → LLM Agent → TTS 語音回覆
 - **攝像頭視覺** → 全螢幕相機 + 圖像分析 → LLM 回覆（Vision 流程）
 - **桌面 + Web 雙端** 通用 UI
-- **OpenCode Server** 作為 LLM 統一中樞（Agent Loop + MCP Tools）
+- **OpenCode Server** 作為 LLM 統一中樞（Agent Loop + bash Tools）
 
 ---
 
@@ -60,6 +60,8 @@ AI 回覆中嵌入控制標記，由 Gateway 解析後轉發前端：
 | `[ACTION:MAP_CLOSE]` | 關閉地圖 |
 | `[ACTION:YOUTUBE:影片ID]` | 彈出 YouTube 影片播放器 |
 | `[ACTION:YOUTUBE_CLOSE]` | 關閉影片播放器 |
+| `[ACTION:NOTEBOOK:{json}]` | 彈出 NotebookLM 內容覆蓋（報告/測驗/心智圖等） |
+| `[ACTION:NOTEBOOK_CLOSE]` | 關閉 NotebookLM 覆蓋 |
 | `[ACTION:NEW_SESSION]` | 建立新對話（當前保留背景） |
 | `[ACTION:SESSION_PREV]` | 切到上一個對話 |
 | `[ACTION:SESSION_NEXT]` | 切到下一個對話 |
@@ -67,6 +69,7 @@ AI 回覆中嵌入控制標記，由 Gateway 解析後轉發前端：
 | `[ACTION:LISTEN_RESUME]` | 恢復 VAD 聆聽 |
 
 ACTION 格式支援 payload：`[ACTION:NAME:PAYLOAD]`，向下相容無 payload 的舊格式。
+JSON payload（如 NOTEBOOK）使用 brace-counting 解析，不受巢狀 `]` 影響。
 
 ### F5：地圖導航（Map Overlay）
 ```
@@ -79,10 +82,10 @@ ACTION 格式支援 payload：`[ACTION:NAME:PAYLOAD]`，向下相容無 payload 
 - 不限美食：景點、加油站、飯店、便利商店等皆可觸發
 - 語音說「關閉地圖」→ `[ACTION:MAP_CLOSE]`
 
-### F6：工具擴充（MCP Tools）
-- 透過 OpenCode MCP 機制掛載外部工具
+### F6：工具擴充（CLI + bash）
+- 透過 OpenCode 的 `bash` 工具直接呼叫外部 CLI
 - AI 自主判斷何時呼叫工具
-- 目前已掛載：`notebooklm-mcp`（Google NotebookLM 操作）
+- 目前已整合：`notebooklm-py`（Google NotebookLM CLI，使用 Google 內部 RPC API）
 
 ### F7：螢幕截圖分析（Screen Capture）
 ```
@@ -136,20 +139,40 @@ ACTION 格式支援 payload：`[ACTION:NAME:PAYLOAD]`，向下相容無 payload 
 - 觸發詞：「安靜」「不要聽了」「暫停聆聽」
 - 由 Skill 驅動（`.opencode/skills/listen-control/SKILL.md`）
 
-### F12：NotebookLM 整合（MCP）
+### F12：NotebookLM 整合（notebooklm-py CLI）
 ```
 使用者: "幫我查筆記本裡關於 RAG 的內容"
-  → AI 呼叫 notebooklm_ask_question 工具
-  → MCP 透過 Chrome 自動化操作 NotebookLM
-  → Gemini 2.5 帶引用回覆
-  → AI 轉化為口語回覆
+  → AI 載入 notebooklm skill
+  → bash: notebooklm ask "what is RAG"
+  → Google RPC API → Gemini 2.5 帶引用回覆（3-10 秒）
+  → AI 轉化為中文口語回覆
 ```
-- 透過 OpenCode MCP 機制掛載 `notebooklm-mcp` 伺服器
-- Chrome 持久 Profile 保持 Google 登入狀態
-- 支援：筆記本問答、新增來源、產生 Podcast、管理筆記本
+- 使用 `notebooklm-py` CLI（Python，透過 Google 內部 RPC API 直接呼叫）
+- 無需 Chrome 瀏覽器，純 HTTP 請求，速度快且穩定
+- 支援完整功能：筆記本 CRUD、問答、來源管理（URL/文字/檔案/AI 研究）、
+  內容產生（音訊/影片/簡報/測驗/閃卡/心智圖/報告/資訊圖表/資料表格）、
+  下載、筆記、分享、語言設定
 - 由 Skill 驅動（`.opencode/skills/notebooklm/SKILL.md`）
-- 首次需執行 `setup_auth` 登入 Google（可見 Chrome 視窗）
-- `standard` profile：10 個工具，平衡功能與 context 消耗
+- 首次需執行 `notebooklm login` 開瀏覽器登入 Google（一次性）
+- 認證後 Cookie 保存在 `~/.notebooklm/storage_state.json`，後續純 API 操作
+
+**NotebookLM Overlay（前端視覺呈現）：**
+```
+使用者: "幫我出個測驗"
+  → AI: notebooklm generate quiz → download quiz --format json
+  → 取得結構化資料
+  → [ACTION:NOTEBOOK:{"type":"quiz","title":"...","data":"[...]"}]
+  → 前端 NotebookOverlay 滑入顯示互動測驗卡片
+```
+支援 6 種內容類型渲染：
+| type | 資料格式 | 渲染方式 |
+|------|----------|----------|
+| `markdown` | Markdown 文字 | HTML 渲染（報告、學習指南） |
+| `mindmap` | JSON 樹結構 | 可展開節點（`<details>`） |
+| `quiz` | JSON 題目陣列 | 多選卡片 + 互動答題 |
+| `flashcards` | JSON 正反面 | 3D 翻轉動畫卡片 |
+| `media` | 檔案路徑 | 下載按鈕 + 類型標籤 |
+| `table` | CSV 字串 | HTML 表格渲染 |
 
 ### F10：Gateway 串流日誌（Streaming Logs）
 ```
@@ -190,9 +213,9 @@ ACTION 格式支援 payload：`[ACTION:NAME:PAYLOAD]`，向下相容無 payload 
 ┌───────▼────────────▼────────────▼───────────────▼─────────┐
 │           OpenCode Server (LLM Hub)  :4096                 │
 │  ┌────────────────┐ ┌────────────┐ ┌───────────────────┐  │
-│  │   Providers    │ │   Agent    │ │    MCP Tools      │  │
-│  │ github-copilot │ │   Loop     │ │  (Pencil, etc.)   │  │
-│  │ claude-sonnet-4│ │            │ │                   │  │
+│  │   Providers    │ │   Agent    │ │   bash + CLI      │  │
+│  │ github-copilot │ │   Loop     │ │ (notebooklm-py    │  │
+│  │ claude-sonnet-4│ │            │ │  websearch, etc)  │  │
 │  └────────────────┘ └────────────┘ └───────────────────┘  │
 └───────────────────────────────────────────────────────────┘
 ```
@@ -213,7 +236,8 @@ ACTION 格式支援 payload：`[ACTION:NAME:PAYLOAD]`，向下相容無 payload 
 | **LLM Model** | github-copilot/claude-sonnet-4 | 免費 (Copilot) |
 | **Vision** | 同上 (Claude Sonnet 支援圖片) | 原生多模態 |
 | **攝像頭** | MediaDevices API | Web 標準 |
-| **工具系統** | OpenCode MCP | 標準化工具協定 |
+| **工具系統** | OpenCode bash + CLI | AI 直接呼叫系統指令 |
+| **NotebookLM** | notebooklm-py (Python CLI) | Google RPC API，非 Chrome 自動化 |
 | **Monorepo** | pnpm workspace | apps/ + services/ + packages/ |
 
 ---
@@ -473,6 +497,7 @@ zerojarvis/
 │   │   │   │   │   ├── CameraPreview.svelte # 攝像頭預覽 (科幻 HUD)
 │   │   │   │   │   ├── MapOverlay.svelte    # 地圖覆蓋 (科幻 HUD)
 │   │   │   │   │   ├── YouTubeOverlay.svelte # YouTube 影片播放器
+│   │   │   │   │   ├── NotebookOverlay.svelte # NotebookLM 內容顯示 (6 種渲染)
 │   │   │   │   │   ├── SessionTabs.svelte   # 多會話底部 tab 列 (F9)
 │   │   │   │   │   └── ConfirmPanel.svelte  # 確認面板
 │   │   │   │   ├── stores/
@@ -562,7 +587,11 @@ Skills 是 Markdown 文件，定義 AI 在特定情境下的行為規則：
 ├── screenshot/SKILL.md        # 螢幕截圖 (SCREENSHOT)
 ├── youtube/SKILL.md           # YouTube 影片 (YOUTUBE/YOUTUBE_CLOSE)
 ├── session/SKILL.md           # 多會話管理 (NEW_SESSION/SESSION_PREV/NEXT)
-└── listen-control/SKILL.md   # 聆聽控制 (LISTEN_PAUSE/LISTEN_RESUME)└── notebooklm/SKILL.md       # NotebookLM 筆記本操作 (MCP 工具)```
+├── listen-control/SKILL.md   # 聆聽控制 (LISTEN_PAUSE/LISTEN_RESUME)
+└── notebooklm/SKILL.md       # NotebookLM 完整操作 (NOTEBOOK/NOTEBOOK_CLOSE)
+                               #   問答、來源、產生、下載、筆記、分享
+                               #   + 6 種 overlay 渲染（報告/心智圖/測驗/閃卡/媒體/表格）
+```
 
 新增功能的步驟：
 1. 撰寫 `.opencode/skills/新功能/SKILL.md` — 定義 AI 行為
@@ -593,7 +622,8 @@ Skills 是 Markdown 文件，定義 AI 在特定情境下的行為規則：
 - [x] Gateway 串流日誌（完整 SSE 事件 + timing）
 - [x] Per-Session 獨立狀態（每個 session 獨立 UI 快照，覆蓋層暫停/恢復）
 - [x] 聆聽控制技能（AI 可暫停/恢復 VAD）
-- [x] NotebookLM 整合（MCP 工具，問答 + 來源管理 + Podcast 產生）
+- [x] NotebookLM 整合（notebooklm-py CLI，問答 + 來源管理 + 內容產生 + 前端 Overlay 顯示）
+- [ ] NotebookLM 線上播放（音視訊 serve + `<audio>`/`<video>` 播放器）
 - [ ] Session 持久化（SQLite，重啟保留歷史）
 - [ ] 語音快捷指令（自訂短語對應動作）
 - [ ] 喚醒詞 "Jarvis" 支援

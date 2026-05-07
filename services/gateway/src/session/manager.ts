@@ -3,7 +3,7 @@
  * Manages multiple parallel OpenCode sessions with voice switching.
  */
 
-import type { SessionTab, SessionStatus, SessionSnapshot, AgentState } from "@zerojarvis/shared";
+import type { SessionTab, SessionStatus, SessionSnapshot, AgentState, NotebookContent } from "@zerojarvis/shared";
 
 export interface ManagedSession {
   id: string;
@@ -16,6 +16,7 @@ export interface ManagedSession {
   cameraOn: boolean;
   mapQuery: string;
   youtubeVideoId: string;
+  notebookContent: NotebookContent | null;
   error: string | null;
   createdAt: number;
 }
@@ -37,6 +38,7 @@ export function createSession(title?: string): ManagedSession {
     cameraOn: false,
     mapQuery: "",
     youtubeVideoId: "",
+    notebookContent: null,
     error: null,
     createdAt: Date.now(),
   };
@@ -127,6 +129,7 @@ export function getSnapshot(id: string): SessionSnapshot | null {
     cameraOn: session.cameraOn,
     mapQuery: session.mapQuery,
     youtubeVideoId: session.youtubeVideoId,
+    notebookContent: session.notebookContent,
     error: session.error,
   };
 }
