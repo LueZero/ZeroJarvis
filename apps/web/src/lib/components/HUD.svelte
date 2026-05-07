@@ -252,13 +252,7 @@
         stopVAD();
         listening = false;
         listenPaused = true;
-        break;
-      case "LISTEN_RESUME":
-        listenPaused = false;
-        if (vadReady) {
-          startVAD();
-          listening = true;
-        }
+        setState("idle");
         break;
     }
   }
@@ -322,6 +316,7 @@
   function stopListening() {
     stopVAD();
     listening = false;
+    setState("idle");
   }
 
   function handleInterrupt() {
