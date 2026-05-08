@@ -202,7 +202,17 @@
         setSessions((msg as any).sessions);
         break;
       case "session_switch":
+        // Stop any playing audio & reset before switching
+        stopAudio();
+        audioPlaying = false;
         switchSession((msg as any).sessionId, (msg as any).state);
+        // After switch, if new session is idle and mic is on, restart VAD
+        if (getState() === "idle" && listening && !listenPaused && vadReady) {
+          startVAD();
+        } else if (getState() !== "idle") {
+          // Non-idle loaded state (e.g. thinking from background) — stop VAD
+          stopVAD();
+        }
         break;
       case "session_done":
         updateSessionDone((msg as any).sessionId, (msg as any).text);
@@ -931,16 +941,18 @@
     min-height: 0;
     gap: 6px;
     overflow: hidden;
+    /* Push reactor upward so it doesn't overlap with subtitle + tabs */
+    margin-bottom: 15vh;
   }
 
   .hud-center {
-    flex: 1;
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
     gap: 4px;
     width: 100%;
+    max-height: 55vh;
   }
 
   .reactor-label {
@@ -1031,6 +1043,7 @@
 
     .hud-center {
       margin: 0;
+      max-height: 45vh;
     }
 
     .reactor-label {

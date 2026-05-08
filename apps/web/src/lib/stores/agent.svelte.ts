@@ -235,6 +235,12 @@ export function switchSession(sessionId: string, snapshot: SessionSnapshot) {
     messages = [];
   }
 
+  // After loading, if the session was in speaking/thinking but audio is now gone,
+  // reset to idle so the UI doesn't get stuck in a non-idle animation
+  if (agentState === "speaking" || agentState === "thinking") {
+    agentState = "idle";
+  }
+
   // Update active flags in tabs
   sessions = sessions.map(s => ({ ...s, active: s.id === sessionId }));
 }

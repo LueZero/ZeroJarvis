@@ -134,6 +134,18 @@ JSON payload（如 NOTEBOOK）使用 brace-counting 解析，不受巢狀 `]` �
 - 觸發詞：「安靜」「不要聽了」「暫停聆聽」
 - 由 Skill 驅動（`.opencode/skills/listen-control/SKILL.md`）
 
+**麥克風暫停（禁止聆聽）機制：**
+- 暫停狀態由 `listening` + `listenPaused` 兩個旗標共同管理
+- 暫停時 `stopVAD()` 立即停止語音活動偵測，不再送出任何音訊
+- 暫停期間 AI 仍可正常回覆（TTS 播放不受影響）
+- 恢復聆聽時自動呼叫 `ensureAudioContext()` → `startVAD()`
+- AI 正忙（thinking/speaking）時恢復聆聽：設定旗標排隊，等 AI 回到 idle 後自動啟動 VAD
+- **多會話切換時的行為**：
+  - 切換 session 前先 `stopAudio()` 停止當前音訊播放
+  - 切換後若新 session 狀態為 idle 且 mic 啟用 → 自動重啟 VAD
+  - 切換後若新 session 為 thinking/speaking（歷史快照） → 強制重設為 idle（因音訊已失效）
+  - 麥克風暫停狀態為全域共享（不隨 session 切換改變）
+
 ### F12：NotebookLM 整合（notebooklm-py CLI）
 ```
 使用者: "幫我查筆記本裡關於 RAG 的內容"
