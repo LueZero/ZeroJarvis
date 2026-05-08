@@ -46,6 +46,7 @@
   let chatInput = $state("");
   let showChatInput = $state(false);
   let screenshotActive = $state(false);
+  let notebookRef: NotebookOverlay | undefined = $state(undefined);
 
   // Connect to Gateway on mount & auto-start mic
   $effect(() => {
@@ -244,11 +245,21 @@
         break;
       case "NOTEBOOK":
         if (payload) {
-          try { setNotebookContent(JSON.parse(payload)); } catch {}
+          try {
+            const nc = JSON.parse(payload);
+            setNotebookContent(nc);
+            send({ type: "notebook_state", active: true, contentType: nc.type } as any);
+          } catch {}
         }
         break;
       case "NOTEBOOK_CLOSE":
         clearNotebookContent();
+        send({ type: "notebook_state", active: false } as any);
+        break;
+      case "NOTEBOOK_CMD":
+        if (payload && notebookRef) {
+          try { notebookRef.handleVoiceCommand(JSON.parse(payload)); } catch {}
+        }
         break;
       case "NEW_SESSION":
         send({ type: "new_chat" });
@@ -521,7 +532,7 @@
 
   <!-- NotebookLM overlay (triggered by [ACTION:NOTEBOOK:json]) -->
   {#if getNotebookContent()}
-    <NotebookOverlay content={getNotebookContent()!} onClose={clearNotebookContent} />
+    <NotebookOverlay bind:this={notebookRef} content={getNotebookContent()!} onClose={() => { clearNotebookContent(); send({ type: "notebook_state", active: false } as any); }} />
   {/if}
 
   <!-- Subtitle overlay (bottom, does not push layout) -->

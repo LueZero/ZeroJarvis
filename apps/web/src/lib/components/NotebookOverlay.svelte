@@ -3,26 +3,75 @@
    * Full-screen NotebookLM content overlay — Sci-fi HUD style
    * Triggered by [ACTION:NOTEBOOK:json] from AI
    * Supports: markdown, mindmap, quiz, flashcards, media, table
+   * Voice + touch interactive mode for quiz, flashcards, mindmap
    */
   import type { NotebookContent } from "@zerojarvis/shared";
 
   interface Props {
     content: NotebookContent;
     onClose: () => void;
+    onVoiceCommand?: (cmd: any) => void;
   }
 
   let { content, onClose }: Props = $props();
 
   // --- Quiz State ---
   let selectedAnswers = $state<Record<number, number>>({});
+  let currentQuestion = $state(0);
 
   function selectAnswer(qIdx: number, optIdx: number) {
     if (selectedAnswers[qIdx] !== undefined) return; // already answered
     selectedAnswers = { ...selectedAnswers, [qIdx]: optIdx };
   }
 
+  type QuizQuestion = { question: string; options: string[]; correct: number; rationale?: string };
+
+  function quizQuestions(): QuizQuestion[] | null {
+    if (content.type !== "quiz") return null;
+    const raw = parseJson(content.data);
+    if (!raw) return null;
+
+    // Normalize: support both overlay format and NotebookLM native format
+    const arr = Array.isArray(raw) ? raw : (raw as any).questions ?? (raw as any).data;
+    if (!Array.isArray(arr)) return null;
+
+    return arr.map((q: any) => {
+      // Already in overlay format: {question, options: string[], correct: number}
+      if (Array.isArray(q.options) && typeof q.correct === "number") return q;
+
+      // NotebookLM format: {question, answerOptions: [{text, isCorrect, rationale}]}
+      if (Array.isArray(q.answerOptions)) {
+        const options = q.answerOptions.map((o: any) => o.text ?? o);
+        const correctIdx = q.answerOptions.findIndex((o: any) => o.isCorrect);
+        const correctOpt = q.answerOptions.find((o: any) => o.isCorrect);
+        return {
+          question: q.question,
+          options,
+          correct: correctIdx >= 0 ? correctIdx : 0,
+          rationale: correctOpt?.rationale ?? q.hint ?? q.rationale,
+        };
+      }
+
+      return q; // best-effort passthrough
+    });
+  }
+
+  function quizScore(): { answered: number; correct: number; total: number } {
+    const qs = quizQuestions();
+    if (!qs) return { answered: 0, correct: 0, total: 0 };
+    const answered = Object.keys(selectedAnswers).length;
+    const correct = Object.entries(selectedAnswers).filter(([qIdx, optIdx]) => qs[Number(qIdx)]?.correct === optIdx).length;
+    return { answered, correct, total: qs.length };
+  }
+
+  function scrollToQuestion(idx: number) {
+    const el = document.querySelector(`[data-quiz-idx="${idx}"]`);
+    if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
+  }
+
   // --- Flashcard State ---
   let flippedCards = $state<Set<number>>(new Set());
+  let currentCard = $state(0);
 
   function flipCard(idx: number) {
     const next = new Set(flippedCards);
@@ -31,9 +80,102 @@
     flippedCards = next;
   }
 
+  function flashcardItems(): { front: string; back: string }[] | null {
+    if (content.type !== "flashcards") return null;
+    const raw = parseJson(content.data);
+    if (!raw) return null;
+    // Support both [{front,back}] array and {cards: [{front,back}]} wrapper
+    if (Array.isArray(raw)) return raw;
+    if ((raw as any).cards && Array.isArray((raw as any).cards)) return (raw as any).cards;
+    return null;
+  }
+
+  // --- Public: handle voice command from HUD ---
+  export function handleVoiceCommand(cmd: { cmd: string; value?: number }) {
+    switch (cmd.cmd) {
+      // Quiz
+      case "answer": {
+        const qs = quizQuestions();
+        if (qs && cmd.value !== undefined && currentQuestion < qs.length) {
+          selectAnswer(currentQuestion, cmd.value);
+        }
+        break;
+      }
+      case "next": {
+        if (content.type === "quiz") {
+          const qs = quizQuestions();
+          if (qs && currentQuestion < qs.length - 1) {
+            currentQuestion++;
+            scrollToQuestion(currentQuestion);
+          }
+        } else if (content.type === "flashcards") {
+          const cards = flashcardItems();
+          if (cards && currentCard < cards.length - 1) {
+            currentCard++;
+          }
+        }
+        break;
+      }
+      case "prev": {
+        if (content.type === "quiz") {
+          if (currentQuestion > 0) {
+            currentQuestion--;
+            scrollToQuestion(currentQuestion);
+          }
+        } else if (content.type === "flashcards") {
+          if (currentCard > 0) {
+            currentCard--;
+          }
+        }
+        break;
+      }
+      case "flip": {
+        if (content.type === "flashcards") {
+          flipCard(currentCard);
+        }
+        break;
+      }
+      case "reset": {
+        if (content.type === "quiz") {
+          selectedAnswers = {};
+          currentQuestion = 0;
+          scrollToQuestion(0);
+        }
+        break;
+      }
+      case "close": {
+        onClose();
+        break;
+      }
+      case "expand": {
+        if (content.type === "mindmap") {
+          document.querySelectorAll('.mindmap-content details').forEach(d => (d as HTMLDetailsElement).open = true);
+        }
+        break;
+      }
+      case "collapse": {
+        if (content.type === "mindmap") {
+          document.querySelectorAll('.mindmap-content details').forEach(d => (d as HTMLDetailsElement).open = false);
+        }
+        break;
+      }
+      case "scroll_down": {
+        const scrollEl = document.querySelector('.content-scroll');
+        scrollEl?.scrollBy({ top: 300, behavior: 'smooth' });
+        break;
+      }
+      case "scroll_up": {
+        const scrollEl = document.querySelector('.content-scroll');
+        scrollEl?.scrollBy({ top: -300, behavior: 'smooth' });
+        break;
+      }
+    }
+  }
+
   // --- Markdown rendering (lightweight) ---
-  function renderMarkdown(md: string): string {
-    return md
+  function renderMarkdown(md: string | unknown): string {
+    const s = typeof md === "string" ? md : JSON.stringify(md, null, 2);
+    return s
       .replace(/&/g, "&amp;")
       .replace(/</g, "&lt;")
       .replace(/>/g, "&gt;")
@@ -52,13 +194,15 @@
   }
 
   // --- Parse helpers ---
-  function parseJson(data: string): unknown {
+  function parseJson(data: string | unknown): unknown {
+    if (typeof data !== "string") return data; // already parsed (LLM may send object directly)
     try { return JSON.parse(data); }
     catch { return null; }
   }
 
-  function parseCsv(data: string): string[][] {
-    return data.trim().split('\n').map(row => row.split(',').map(c => c.trim()));
+  function parseCsv(data: string | unknown): string[][] {
+    const s = typeof data === "string" ? data : String(data);
+    return s.trim().split('\n').map(row => row.split(',').map(c => c.trim()));
   }
 
   // --- Badge label per type ---
@@ -71,9 +215,35 @@
     table: "DATA TABLE",
   };
 
+  // --- Voice hint per type ---
+  function voiceHints(): string {
+    switch (content.type) {
+      case "quiz": return "語音：答A/B/C/D · 下一題 · 上一題 · 重新開始 · 關閉";
+      case "flashcards": return "語音：翻轉 · 下一張 · 上一張 · 關閉";
+      case "mindmap": return "語音：展開 · 收合 · 關閉";
+      default: return "語音：往上 · 往下 · 關閉";
+    }
+  }
+
   // --- Keyboard close ---
   function handleKeydown(e: KeyboardEvent) {
     if (e.key === "Escape") onClose();
+    // Keyboard shortcuts for quiz/flashcards
+    if (content.type === "quiz") {
+      if (e.key >= "1" && e.key <= "4") {
+        const qs = quizQuestions();
+        if (qs && currentQuestion < qs.length) {
+          selectAnswer(currentQuestion, Number(e.key) - 1);
+        }
+      }
+      if (e.key === "ArrowRight" || e.key === "ArrowDown") handleVoiceCommand({ cmd: "next" });
+      if (e.key === "ArrowLeft" || e.key === "ArrowUp") handleVoiceCommand({ cmd: "prev" });
+    }
+    if (content.type === "flashcards") {
+      if (e.key === " " || e.key === "Enter") { e.preventDefault(); handleVoiceCommand({ cmd: "flip" }); }
+      if (e.key === "ArrowRight") handleVoiceCommand({ cmd: "next" });
+      if (e.key === "ArrowLeft") handleVoiceCommand({ cmd: "prev" });
+    }
   }
 </script>
 
@@ -94,6 +264,10 @@
       <div class="content-scroll">
         <div class="mindmap-content">
           {#if tree}
+            <div class="mm-controls">
+              <button class="mm-ctrl-btn" onclick={() => handleVoiceCommand({ cmd: "expand" })}>⊞ 展開全部</button>
+              <button class="mm-ctrl-btn" onclick={() => handleVoiceCommand({ cmd: "collapse" })}>⊟ 收合全部</button>
+            </div>
             {@render mindmapNode(tree as {label: string; children?: unknown[]})}
           {:else}
             <p class="error-text">無法解析心智圖資料</p>
@@ -102,12 +276,28 @@
       </div>
 
     {:else if content.type === "quiz"}
-      {@const questions = parseJson(content.data) as {question: string; options: string[]; correct: number; rationale?: string}[] | null}
+      {@const questions = quizQuestions()}
       <div class="content-scroll">
         <div class="quiz-content">
           {#if questions}
+            <!-- Quiz progress bar -->
+            <div class="quiz-progress">
+              <div class="quiz-progress-bar">
+                <div class="quiz-progress-fill" style="width: {Math.round(quizScore().answered / quizScore().total * 100)}%"></div>
+              </div>
+              <div class="quiz-progress-text">
+                <span>第 {currentQuestion + 1}/{questions.length} 題</span>
+                <span>答對 {quizScore().correct}/{quizScore().answered}</span>
+              </div>
+            </div>
+            <!-- Quiz navigation buttons -->
+            <div class="quiz-nav">
+              <button class="quiz-nav-btn" disabled={currentQuestion === 0} onclick={() => handleVoiceCommand({ cmd: "prev" })}>◀ 上一題</button>
+              <button class="quiz-nav-btn" disabled={currentQuestion >= questions.length - 1} onclick={() => handleVoiceCommand({ cmd: "next" })}>下一題 ▶</button>
+              <button class="quiz-nav-btn reset" onclick={() => handleVoiceCommand({ cmd: "reset" })}>↻ 重新開始</button>
+            </div>
             {#each questions as q, qIdx}
-              <div class="quiz-card">
+              <div class="quiz-card" class:quiz-current={qIdx === currentQuestion} data-quiz-idx={qIdx} onclick={() => { currentQuestion = qIdx; }}>
                 <div class="quiz-question">{qIdx + 1}. {q.question}</div>
                 <div class="quiz-options">
                   {#each q.options as opt, oIdx}
@@ -116,7 +306,7 @@
                       class:selected={selectedAnswers[qIdx] === oIdx}
                       class:correct={selectedAnswers[qIdx] !== undefined && oIdx === q.correct}
                       class:wrong={selectedAnswers[qIdx] === oIdx && oIdx !== q.correct}
-                      onclick={() => selectAnswer(qIdx, oIdx)}
+                      onclick={() => { currentQuestion = qIdx; selectAnswer(qIdx, oIdx); }}
                     >
                       <span class="opt-letter">{String.fromCharCode(65 + oIdx)}</span>
                       <span class="opt-text">{opt}</span>
@@ -130,6 +320,14 @@
                 {/if}
               </div>
             {/each}
+            <!-- Final score display -->
+            {#if quizScore().answered === quizScore().total && quizScore().total > 0}
+              <div class="quiz-score-final">
+                <div class="score-icon">{quizScore().correct === quizScore().total ? '🎉' : quizScore().correct >= quizScore().total * 0.7 ? '👍' : '📚'}</div>
+                <div class="score-text">得分：{quizScore().correct} / {quizScore().total}</div>
+                <div class="score-pct">{Math.round(quizScore().correct / quizScore().total * 100)}%</div>
+              </div>
+            {/if}
           {:else}
             <p class="error-text">無法解析測驗資料</p>
           {/if}
@@ -137,18 +335,45 @@
       </div>
 
     {:else if content.type === "flashcards"}
-      {@const cards = parseJson(content.data) as {front: string; back: string}[] | null}
+      {@const cards = flashcardItems()}
       <div class="content-scroll">
         <div class="flashcards-content">
           {#if cards}
-            {#each cards as card, idx}
-              <button class="flashcard" class:flipped={flippedCards.has(idx)} onclick={() => flipCard(idx)}>
+            <!-- Flashcard navigation + counter -->
+            <div class="fc-nav">
+              <button class="fc-nav-btn" disabled={currentCard === 0} onclick={() => handleVoiceCommand({ cmd: "prev" })}>◀ 上一張</button>
+              <span class="fc-counter">{currentCard + 1} / {cards.length}</span>
+              <button class="fc-nav-btn" disabled={currentCard >= cards.length - 1} onclick={() => handleVoiceCommand({ cmd: "next" })}>下一張 ▶</button>
+            </div>
+            <!-- Focused card (large) -->
+            <div class="fc-focus-area">
+              <button class="flashcard flashcard-focus" class:flipped={flippedCards.has(currentCard)} onclick={() => flipCard(currentCard)}>
                 <div class="flashcard-inner">
-                  <div class="flashcard-front">{card.front}</div>
-                  <div class="flashcard-back">{card.back}</div>
+                  <div class="flashcard-front">
+                    <span class="fc-label">問題</span>
+                    {cards[currentCard].front}
+                  </div>
+                  <div class="flashcard-back">
+                    <span class="fc-label">答案</span>
+                    {cards[currentCard].back}
+                  </div>
                 </div>
               </button>
-            {/each}
+              <div class="fc-tip">點擊卡片翻轉 · 空白鍵翻轉 · ← → 切換</div>
+            </div>
+            <!-- Mini grid (all cards) -->
+            <div class="fc-mini-grid">
+              {#each cards as card, idx}
+                <button
+                  class="fc-mini"
+                  class:fc-mini-active={idx === currentCard}
+                  class:fc-mini-flipped={flippedCards.has(idx)}
+                  onclick={() => { currentCard = idx; }}
+                >
+                  {idx + 1}
+                </button>
+              {/each}
+            </div>
           {:else}
             <p class="error-text">無法解析學習卡資料</p>
           {/if}
@@ -253,7 +478,7 @@
 
   <!-- Bottom hint -->
   <div class="hud-bottom">
-    <span class="hud-hint">語音可下達新指令 · ESC 關閉</span>
+    <span class="hud-hint">{voiceHints()} · ESC 關閉</span>
   </div>
 </div>
 
@@ -393,6 +618,28 @@
     padding-top: 4px;
   }
 
+  .mm-controls {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 16px;
+  }
+
+  .mm-ctrl-btn {
+    padding: 6px 14px;
+    border-radius: 6px;
+    background: rgba(0, 212, 255, 0.08);
+    border: 1px solid rgba(0, 212, 255, 0.25);
+    color: rgba(0, 212, 255, 0.8);
+    font-size: 0.75rem;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .mm-ctrl-btn:hover {
+    background: rgba(0, 212, 255, 0.15);
+    border-color: rgba(0, 212, 255, 0.5);
+  }
+
   /* --- Quiz --- */
   .quiz-content {
     display: flex;
@@ -405,6 +652,12 @@
     border: 1px solid rgba(0, 212, 255, 0.15);
     border-radius: 8px;
     padding: 20px;
+    transition: border-color 0.2s, box-shadow 0.2s;
+  }
+
+  .quiz-card.quiz-current {
+    border-color: rgba(0, 212, 255, 0.5);
+    box-shadow: 0 0 12px rgba(0, 212, 255, 0.15);
   }
 
   .quiz-question {
@@ -486,16 +739,219 @@
     font-weight: 500;
   }
 
+  /* Quiz progress bar */
+  .quiz-progress {
+    margin-bottom: 8px;
+  }
+
+  .quiz-progress-bar {
+    width: 100%;
+    height: 4px;
+    background: rgba(255, 255, 255, 0.08);
+    border-radius: 2px;
+    overflow: hidden;
+  }
+
+  .quiz-progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #00d4ff, #00ff88);
+    border-radius: 2px;
+    transition: width 0.3s ease;
+  }
+
+  .quiz-progress-text {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.7rem;
+    color: rgba(255, 255, 255, 0.45);
+    margin-top: 6px;
+    letter-spacing: 0.05em;
+  }
+
+  /* Quiz navigation */
+  .quiz-nav {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 4px;
+  }
+
+  .quiz-nav-btn {
+    padding: 6px 14px;
+    border-radius: 6px;
+    background: rgba(0, 212, 255, 0.08);
+    border: 1px solid rgba(0, 212, 255, 0.25);
+    color: rgba(0, 212, 255, 0.8);
+    font-size: 0.75rem;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .quiz-nav-btn:hover:not(:disabled) {
+    background: rgba(0, 212, 255, 0.15);
+    border-color: rgba(0, 212, 255, 0.5);
+  }
+
+  .quiz-nav-btn:disabled {
+    opacity: 0.3;
+    cursor: default;
+  }
+
+  .quiz-nav-btn.reset {
+    margin-left: auto;
+    border-color: rgba(255, 85, 119, 0.25);
+    color: rgba(255, 85, 119, 0.7);
+    background: rgba(255, 85, 119, 0.05);
+  }
+
+  .quiz-nav-btn.reset:hover {
+    background: rgba(255, 85, 119, 0.1);
+    border-color: rgba(255, 85, 119, 0.5);
+  }
+
+  /* Quiz final score */
+  .quiz-score-final {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    padding: 24px;
+    background: rgba(0, 255, 136, 0.05);
+    border: 1px solid rgba(0, 255, 136, 0.2);
+    border-radius: 12px;
+  }
+
+  .score-icon {
+    font-size: 2rem;
+  }
+
+  .score-text {
+    color: rgba(255, 255, 255, 0.9);
+    font-size: 1rem;
+    font-weight: 500;
+  }
+
+  .score-pct {
+    color: #00ff88;
+    font-size: 1.5rem;
+    font-weight: 700;
+  }
+
   /* --- Flashcards --- */
   .flashcards-content {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+  }
+
+  /* Navigation bar */
+  .fc-nav {
+    display: flex;
+    align-items: center;
+    justify-content: center;
     gap: 16px;
+  }
+
+  .fc-nav-btn {
+    padding: 6px 14px;
+    border-radius: 6px;
+    background: rgba(0, 212, 255, 0.08);
+    border: 1px solid rgba(0, 212, 255, 0.25);
+    color: rgba(0, 212, 255, 0.8);
+    font-size: 0.75rem;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .fc-nav-btn:hover:not(:disabled) {
+    background: rgba(0, 212, 255, 0.15);
+    border-color: rgba(0, 212, 255, 0.5);
+  }
+
+  .fc-nav-btn:disabled {
+    opacity: 0.3;
+    cursor: default;
+  }
+
+  .fc-counter {
+    color: rgba(255, 255, 255, 0.5);
+    font-size: 0.8rem;
+    letter-spacing: 0.08em;
+    min-width: 60px;
+    text-align: center;
+  }
+
+  /* Focused card area */
+  .fc-focus-area {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .flashcard-focus {
+    width: 100%;
+    max-width: 500px;
+    height: 280px;
+  }
+
+  .fc-tip {
+    font-size: 0.65rem;
+    color: rgba(255, 255, 255, 0.3);
+    letter-spacing: 0.08em;
+  }
+
+  .fc-label {
+    display: block;
+    font-size: 0.6rem;
+    text-transform: uppercase;
+    letter-spacing: 0.15em;
+    opacity: 0.5;
+    margin-bottom: 8px;
+  }
+
+  /* Mini grid */
+  .fc-mini-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    justify-content: center;
+    padding-top: 8px;
+    border-top: 1px solid rgba(255, 255, 255, 0.06);
+  }
+
+  .fc-mini {
+    width: 32px;
+    height: 32px;
+    border-radius: 6px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: rgba(0, 0, 0, 0.3);
+    color: rgba(255, 255, 255, 0.5);
+    font-size: 0.7rem;
+    cursor: pointer;
+    transition: all 0.2s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .fc-mini:hover {
+    border-color: rgba(0, 212, 255, 0.4);
+  }
+
+  .fc-mini-active {
+    border-color: rgba(0, 212, 255, 0.6);
+    background: rgba(0, 212, 255, 0.1);
+    color: #00d4ff;
+  }
+
+  .fc-mini-flipped {
+    background: rgba(0, 255, 136, 0.1);
+    border-color: rgba(0, 255, 136, 0.3);
+    color: rgba(0, 255, 136, 0.8);
   }
 
   .flashcard {
     perspective: 1000px;
-    height: 180px;
     cursor: pointer;
     border: none;
     background: none;
@@ -519,13 +975,14 @@
     position: absolute;
     inset: 0;
     display: flex;
+    flex-direction: column;
     align-items: center;
     justify-content: center;
     padding: 20px;
     border-radius: 8px;
     backface-visibility: hidden;
-    font-size: 0.85rem;
-    line-height: 1.5;
+    font-size: 0.95rem;
+    line-height: 1.6;
     text-align: center;
   }
 

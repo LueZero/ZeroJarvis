@@ -1,5 +1,5 @@
 import type { ServerWebSocket } from "bun";
-import type { ClientMessage, ServerMessage, AgentState } from "@zerojarvis/shared";
+import type { ClientMessage, ServerMessage, AgentState, NotebookContentType } from "@zerojarvis/shared";
 import { transcribe } from "../stt/whisper.js";
 import { chatStream, resetSession, parseActions } from "../llm/opencode.js";
 import { processVision } from "../vision/processor.js";
@@ -15,6 +15,8 @@ interface WSData {
   processing: boolean;
   cameraOn: boolean;
   lastSttText: string;
+  notebookActive: boolean;
+  notebookType: NotebookContentType | null;
 }
 
 /** Session command patterns (loose match — tolerates punctuation and filler words) */
@@ -32,6 +34,59 @@ function detectSessionCommand(text: string): "new" | "prev" | "next" | null {
   if (cleaned.length > 8) return null;
   for (const { cmd, pattern } of SESSION_COMMANDS) {
     if (pattern.test(cleaned)) return cmd;
+  }
+  return null;
+}
+
+// ── Notebook voice command patterns ──
+type NotebookCmd =
+  | { cmd: "answer"; value: number }
+  | { cmd: "next" | "prev" | "flip" | "reset" | "close" | "expand" | "collapse" | "scroll_down" | "scroll_up" };
+
+const NOTEBOOK_COMMANDS_QUIZ: { match: RegExp; result: NotebookCmd }[] = [
+  { match: /^[Aa]$|^答[Aa]$|^選[Aa]$/,   result: { cmd: "answer", value: 0 } },
+  { match: /^[Bb]$|^答[Bb]$|^選[Bb]$/,   result: { cmd: "answer", value: 1 } },
+  { match: /^[Cc]$|^答[Cc]$|^選[Cc]$/,   result: { cmd: "answer", value: 2 } },
+  { match: /^[Dd]$|^答[Dd]$|^選[Dd]$/,   result: { cmd: "answer", value: 3 } },
+  { match: /下一題|next/i,                result: { cmd: "next" } },
+  { match: /上一題|prev/i,                result: { cmd: "prev" } },
+  { match: /重新開始|reset/i,             result: { cmd: "reset" } },
+];
+
+const NOTEBOOK_COMMANDS_FLASHCARDS: { match: RegExp; result: NotebookCmd }[] = [
+  { match: /翻(轉|開|面)|flip/i,           result: { cmd: "flip" } },
+  { match: /下一張|next/i,                 result: { cmd: "next" } },
+  { match: /上一張|prev/i,                 result: { cmd: "prev" } },
+];
+
+const NOTEBOOK_COMMANDS_MINDMAP: { match: RegExp; result: NotebookCmd }[] = [
+  { match: /展開|expand/i,                 result: { cmd: "expand" } },
+  { match: /收合|collapse/i,               result: { cmd: "collapse" } },
+];
+
+const NOTEBOOK_COMMANDS_COMMON: { match: RegExp; result: NotebookCmd }[] = [
+  { match: /^關閉$|^close$/i,              result: { cmd: "close" } },
+  { match: /往下|向下|scroll\s*down/i,     result: { cmd: "scroll_down" } },
+  { match: /往上|向上|scroll\s*up/i,       result: { cmd: "scroll_up" } },
+];
+
+/** Detect notebook voice commands based on current content type */
+function detectNotebookCommand(text: string, contentType: NotebookContentType | null): NotebookCmd | null {
+  const cleaned = text.trim().replace(/[。，！？、.!?,\s]+$/g, "");
+  if (cleaned.length > 10) return null;
+
+  // Type-specific commands first
+  const typeCommands = contentType === "quiz" ? NOTEBOOK_COMMANDS_QUIZ
+    : contentType === "flashcards" ? NOTEBOOK_COMMANDS_FLASHCARDS
+    : contentType === "mindmap" ? NOTEBOOK_COMMANDS_MINDMAP
+    : [];
+
+  for (const { match, result } of typeCommands) {
+    if (match.test(cleaned)) return result;
+  }
+  // Common commands
+  for (const { match, result } of NOTEBOOK_COMMANDS_COMMON) {
+    if (match.test(cleaned)) return result;
   }
   return null;
 }
@@ -64,6 +119,8 @@ export function handleWebSocket() {
         processing: false,
         cameraOn: false,
         lastSttText: "",
+        notebookActive: false,
+        notebookType: null,
       };
       log("WS", `Client connected: ${ws.data.id}`);
       // Ensure at least one session exists
@@ -111,6 +168,17 @@ export function handleWebSocket() {
           if (!msg.text.trim()) {
             setState(ws, "idle");
             break;
+          }
+
+          // Notebook voice command interception (text input path)
+          if (ws.data.notebookActive) {
+            const nbCmd = detectNotebookCommand(msg.text, ws.data.notebookType);
+            if (nbCmd) {
+              log("NOTEBOOK_CMD", `Detected (text): ${JSON.stringify(nbCmd)} from "${msg.text}"`);
+              send(ws, { type: "action", action: "NOTEBOOK_CMD", payload: JSON.stringify(nbCmd) } as any);
+              setState(ws, "idle");
+              break;
+            }
           }
 
           if (ws.data.processing) {
@@ -401,6 +469,14 @@ export function handleWebSocket() {
           break;
         }
 
+        case "notebook_state": {
+          const ns = msg as any;
+          ws.data.notebookActive = !!ns.active;
+          ws.data.notebookType = ns.contentType ?? null;
+          log("WS", `Notebook state: active=${ws.data.notebookActive} type=${ws.data.notebookType}`);
+          break;
+        }
+
         default:
           break;
       }
@@ -523,6 +599,18 @@ export async function processAudio(ws: ServerWebSocket<WSData>) {
     setState(ws, "idle");
     ws.data.processing = false;
     return;
+  }
+
+  // 1.5. Notebook voice command interception (before LLM)
+  if (ws.data.notebookActive) {
+    const nbCmd = detectNotebookCommand(rawText, ws.data.notebookType);
+    if (nbCmd) {
+      log("NOTEBOOK_CMD", `Detected: ${JSON.stringify(nbCmd)} from "${rawText}"`);
+      send(ws, { type: "action", action: "NOTEBOOK_CMD", payload: JSON.stringify(nbCmd) } as any);
+      setState(ws, "idle");
+      ws.data.processing = false;
+      return;
+    }
   }
 
   // Auto-title the active session

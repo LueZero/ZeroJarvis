@@ -19,7 +19,8 @@ export type ClientMessage =
   | { type: "interrupt" }
   | { type: "new_chat" }
   | { type: "switch_session"; sessionId: string }
-  | { type: "config"; settings: Partial<UserConfig> };
+  | { type: "config"; settings: Partial<UserConfig> }
+  | { type: "notebook_state"; active: boolean; contentType?: NotebookContentType };
 
 // --- WebSocket Messages: Server → Client ---
 export type ServerMessage =
