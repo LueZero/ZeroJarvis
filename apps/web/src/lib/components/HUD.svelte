@@ -88,10 +88,20 @@
       if (!vadReady) {
         await initVAD({
           onSpeechStart() {
+            // Guard: don't override thinking/speaking state
+            if (isBusy()) {
+              console.log("HUD | onSpeechStart blocked — AI is", getState());
+              return;
+            }
             setState("listening");
             setSttText("聆聽中...");
           },
           onSpeechEnd(audio) {
+            // Guard: don't send audio if AI is already processing
+            if (isBusy()) {
+              console.log("HUD | onSpeechEnd blocked — AI is", getState());
+              return;
+            }
             console.log("HUD | speech ended, sending", audio.length, "samples to gateway");
             stopVAD();
             setState("thinking");
@@ -270,6 +280,12 @@
     });
   }
 
+  /** Check if AI is currently busy (thinking or speaking) */
+  function isBusy(): boolean {
+    const s = getState();
+    return s === "thinking" || s === "speaking";
+  }
+
   /** Unified listening control — single source of truth for all toggle paths */
   async function toggleListening(forceState?: "on" | "off") {
     const isOn = listening && !listenPaused;
@@ -277,15 +293,33 @@
 
     if (wantOn) {
       // === Turn ON ===
+      if (isBusy()) {
+        // AI is busy — don't start VAD now, but set flags so VAD
+        // auto-starts once AI returns to idle (handleServerMessage idle branch)
+        console.log("HUD | toggleListening: queued ON for after", getState());
+        listening = true;
+        listenPaused = false;
+        return;
+      }
       try {
         await ensureAudioContext();
         if (!vadReady) {
           await initVAD({
             onSpeechStart() {
+              // Guard: don't override thinking/speaking state
+              if (isBusy()) {
+                console.log("HUD | onSpeechStart blocked — AI is", getState());
+                return;
+              }
               setState("listening");
               setSttText("聆聽中...");
             },
             onSpeechEnd(audio) {
+              // Guard: don't send audio if AI is already processing
+              if (isBusy()) {
+                console.log("HUD | onSpeechEnd blocked — AI is", getState());
+                return;
+              }
               console.log("HUD | speech ended, sending", audio.length, "samples to gateway");
               stopVAD();
               setState("thinking");
@@ -366,6 +400,11 @@
   function sendChatText() {
     const text = chatInput.trim();
     if (!text) return;
+    // Block: cannot send text while AI is thinking or speaking
+    if (isBusy()) {
+      console.log("HUD | sendChatText blocked — AI is", getState());
+      return;
+    }
     // Stop VAD while processing
     stopVAD();
     setState("thinking");
