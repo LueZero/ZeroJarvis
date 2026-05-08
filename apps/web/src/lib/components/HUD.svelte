@@ -8,6 +8,7 @@
   import MapOverlay from "./MapOverlay.svelte";
   import NotebookOverlay from "./NotebookOverlay.svelte";
   import SessionTabs from "./SessionTabs.svelte";
+  import ScreenCaptureTool from "./ScreenCaptureTool.svelte";
   import {
     getState,
     setState,
@@ -44,7 +45,7 @@
   let listenPaused = $state(false);
   let chatInput = $state("");
   let showChatInput = $state(false);
-
+  let screenshotActive = $state(false);
 
   // Connect to Gateway on mount & auto-start mic
   $effect(() => {
@@ -222,6 +223,9 @@
           triggerCapture();
         }
         break;
+      case "SCREENSHOT":
+        screenshotActive = true;
+        break;
       case "MAP":
         if (payload) setMapQuery(payload);
         break;
@@ -235,9 +239,6 @@
         break;
       case "NOTEBOOK_CLOSE":
         clearNotebookContent();
-        break;
-      case "SCREENSHOT":
-        triggerScreenshot();
         break;
       case "NEW_SESSION":
         send({ type: "new_chat" });
@@ -267,14 +268,6 @@
         send({ type: "image", data: frame, query: getSttText() || "請描述你看到的內容" });
       }
     });
-  }
-
-  async function triggerScreenshot() {
-    const { captureScreen } = await import("$lib/capture/screen");
-    const frame = await captureScreen();
-    if (frame) {
-      send({ type: "image", data: frame, query: getSttText() || "請分析這個螢幕畫面" });
-    }
   }
 
   /** Unified listening control — single source of truth for all toggle paths */
@@ -345,6 +338,15 @@
   function handleCameraCapture(imageBase64: string) {
     send({ type: "image", data: imageBase64, query: getSttText() || "請描述你看到的內容" });
     setCameraOn(false);
+  }
+
+  function handleScreenshotCapture(base64: string) {
+    screenshotActive = false;
+    send({ type: "screenshot_response", data: base64 } as any);
+  }
+
+  function handleScreenshotCancel() {
+    screenshotActive = false;
   }
 
   function toggleMenu() {
@@ -469,6 +471,9 @@
 
   <!-- Camera (fullscreen overlay, managed by CameraPreview) -->
   <CameraPreview onCapture={handleCameraCapture} />
+
+  <!-- Screenshot region selection + annotation tool -->
+  <ScreenCaptureTool active={screenshotActive} onCapture={handleScreenshotCapture} onCancel={handleScreenshotCancel} />
 
   <!-- Map overlay (triggered by [ACTION:MAP:query]) -->
   {#if getMapQuery()}

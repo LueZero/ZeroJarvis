@@ -14,6 +14,7 @@ interface WSData {
   audioChunks: ArrayBuffer[];
   processing: boolean;
   cameraOn: boolean;
+  lastSttText: string;
 }
 
 /** Session command patterns (loose match — tolerates punctuation and filler words) */
@@ -62,6 +63,7 @@ export function handleWebSocket() {
         audioChunks: [],
         processing: false,
         cameraOn: false,
+        lastSttText: "",
       };
       log("WS", `Client connected: ${ws.data.id}`);
       // Ensure at least one session exists
@@ -104,6 +106,7 @@ export function handleWebSocket() {
           // Text input (typed by user) — send directly to LLM like voice
           log("STT", `Received transcribed text: "${msg.text}"`);
           send(ws, { type: "stt_final", text: msg.text });
+          ws.data.lastSttText = msg.text;
 
           if (!msg.text.trim()) {
             setState(ws, "idle");
@@ -193,6 +196,7 @@ export function handleWebSocket() {
             } else {
               setState(ws, "idle");
             }
+
           } catch (err) {
             sessionManager.setStatus(managedId, "error");
             sendSessionList(ws);
@@ -314,6 +318,54 @@ export function handleWebSocket() {
         case "interrupt": {
           ws.data.processing = false;
           setState(ws, "idle");
+          break;
+        }
+
+        case "screenshot_response": {
+          // Frontend sends back the user's selected/annotated screenshot
+          // Process like a normal conversation: thinking → llm_delta → llm_done → speaking → tts
+          ws.data.processing = true;
+          setState(ws, "thinking");
+          send(ws, { type: "stt_final", text: "📷 螢幕截圖分析中..." });
+          try {
+            const base64 = (msg as any).data as string;
+            log("SCREENSHOT", `Received screenshot from frontend (${Math.round(base64.length * 0.75 / 1024)}KB)`);
+            
+            // Use user's original speech as context, fallback to generic
+            const userQuery = ws.data.lastSttText || "請分析這個螢幕畫面";
+            const visionQuery = `使用者說：「${userQuery}」\n\n請根據使用者的意圖分析這個螢幕截圖。如果有標註框線，重點分析標註區域。`;
+            log("SCREENSHOT", `Vision query context: "${userQuery}"`);
+
+            const result = await processVision(
+              base64,
+              visionQuery,
+              (delta) => {
+                send(ws, { type: "llm_delta", text: delta });
+              },
+            );
+            const { cleanText, actions } = parseActions(result.text);
+            log("SCREENSHOT", `Vision done (${cleanText.length} chars), sending to frontend`);
+            send(ws, { type: "llm_done", text: cleanText });
+            for (const a of actions) {
+              send(ws, { type: "action", action: a.action, payload: a.payload });
+            }
+
+            if (cleanText) {
+              setState(ws, "speaking");
+              const audioData = await synthesize(cleanText);
+              log("SCREENSHOT", `TTS done (${audioData.byteLength} bytes), sending audio`);
+              ws.send(audioData);
+              send(ws, { type: "tts_end" });
+            } else {
+              setState(ws, "idle");
+            }
+          } catch (err) {
+            logError("SCREENSHOT", `Vision analysis failed: ${err}`);
+            send(ws, { type: "error", message: `螢幕截圖分析失敗: ${err}` });
+            setState(ws, "idle");
+          } finally {
+            ws.data.processing = false;
+          }
           break;
         }
 
@@ -457,6 +509,7 @@ export async function processAudio(ws: ServerWebSocket<WSData>) {
     const sttTime = Math.round(performance.now() - sttStart);
     log("STT", `Result (${sttTime}ms): "${rawText}"`);
     send(ws, { type: "stt_final", text: rawText });
+    ws.data.lastSttText = rawText;
   } catch (err) {
     logError("STT", `Failed: ${err}`);
     send(ws, { type: "error", message: `語音辨識失敗: ${err}` });

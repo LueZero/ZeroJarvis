@@ -91,14 +91,14 @@ JSON payload（如 NOTEBOOK）使用 brace-counting 解析，不受巢狀 `]` �
 ```
 使用者: "幫我看螢幕上這個錯誤"
   → AI 回覆 + [ACTION:SCREENSHOT]
-  → Desktop: Tauri 原生截圖 (xcap, 無彈窗)
-  → Web: getDisplayMedia (瀏覽器授權彈窗)
-  → base64 JPEG → Vision Agent 分析
+  → 前端彈出框選截圖工具（getDisplayMedia 持久串流）
+  → 使用者框選區域 + 可加標註框線
+  → 送出 → base64 JPEG → Gateway → Vision Agent 分析
 ```
 - 由 Skill 驅動（`.opencode/skills/screenshot/SKILL.md`）
 - 與 CAPTURE 區分：CAPTURE = 攝像頭實體拍照，SCREENSHOT = 電腦螢幕
-- Desktop 模式零延遲（Rust xcap 原生 API，不需用戶確認）
-- Web 模式觸發系統畫面分享對話框
+- 第一次截圖需授權螢幕分享（僅一次），後續零彈窗
+- 使用者可框選重點區域並加上標註框線幫助 AI 聚焦
 
 ### F9：多會話管理（Multi-Session）
 ```
@@ -617,7 +617,7 @@ Skills 是 Markdown 文件，定義 AI 在特定情境下的行為規則：
 
 ## 13. 未來規劃
 
-- [x] 螢幕截圖分析（Tauri 系統截圖 + Web getDisplayMedia）
+- [x] 螢幕截圖分析（前端框選截圖 + 標註，送 Vision 分析）
 - [x] 多會話管理（平行對話 + 語音切換 + 底部 tab 列）
 - [x] Gateway 串流日誌（完整 SSE 事件 + timing）
 - [x] Per-Session 獨立狀態（每個 session 獨立 UI 快照，覆蓋層暫停/恢復）

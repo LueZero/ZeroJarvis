@@ -19,6 +19,12 @@
       return;
     }
 
+    // Kick-start: if displayedLlm is empty but text exists, show first chunk immediately
+    // This ensures {#if displayedLlm} becomes true right away (critical for Vision responses)
+    if (!displayedLlm && fullText) {
+      displayedLlm = fullText.slice(0, Math.min(3, fullText.length));
+    }
+
     // Start typewriter if not already running
     if (!typewriterTimer) {
       typewriterTimer = setInterval(() => {

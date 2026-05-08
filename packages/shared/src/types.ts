@@ -13,6 +13,7 @@ export type ClientMessage =
   | { type: "audio"; data: ArrayBuffer }
   | { type: "audio_text"; text: string }
   | { type: "image"; data: string; query: string }
+  | { type: "screenshot_response"; data: string }
   | { type: "confirm"; text: string }
   | { type: "cancel" }
   | { type: "interrupt" }

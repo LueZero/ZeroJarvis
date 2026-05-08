@@ -6,7 +6,7 @@
 
 import { getClient } from "../llm/client.js";
 import { writeFile, mkdir } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { join, resolve, basename } from "node:path";
 import { fileURLToPath } from "node:url";
 
 export interface VisionResult {
@@ -72,7 +72,7 @@ export async function processVision(
           {
             type: "file",
             mime: "image/jpeg",
-            filename: imagePath.split("/").pop() || "capture.jpg",
+            filename: basename(imagePath),
             url: `data:image/jpeg;base64,${imageBase64}`,
           },
         ],
@@ -82,7 +82,7 @@ export async function processVision(
       console.error("👁 Vision promptAsync error:", err.message);
     });
 
-    // Read events
+    // Read events (match chatStream's pattern for reliability)
     let fullText = "";
     let done = false;
     const timeout = setTimeout(() => {
@@ -94,26 +94,51 @@ export async function processVision(
       for await (const event of eventStream) {
         if (done) break;
         const evt = event as any;
+        const props = evt.properties ?? {};
 
-        if (evt.type === "message.part.updated") {
-          const part = evt.properties?.part;
-          if (part?.type === "text" && part?.sessionID === visionSessionId) {
-            const newText = part.text ?? "";
-            if (newText.length > fullText.length) {
-              const delta = newText.slice(fullText.length);
-              fullText = newText;
-              onDelta?.(delta);
-            }
+        // Session ID filtering (same as chatStream)
+        const evtSessionId = props.sessionID ?? props.part?.sessionID;
+        if (evtSessionId && evtSessionId !== visionSessionId) continue;
+
+        // ── message.part.delta: incremental text streaming ──
+        if (evt.type === "message.part.delta") {
+          const delta = props.delta ?? "";
+          const partType = props.part?.type ?? props.type;
+
+          if (partType === "text" || !partType || partType !== "reasoning") {
+            // Skip user echo
+            if (delta.trim() === userQuery.trim()) continue;
+            fullText += delta;
+            onDelta?.(delta);
           }
+          continue;
         }
 
-        if (evt.type === "session.idle" && evt.properties?.sessionID === visionSessionId) {
+        // ── message.part.updated: structural snapshots (fallback sync) ──
+        if (evt.type === "message.part.updated") {
+          const part = props.part;
+          if (!part) continue;
+
+          if (part.type === "text") {
+            const newText = part.text ?? "";
+            // Skip user's own message echo
+            if (newText.trim() === userQuery.trim()) continue;
+            if (newText.length > fullText.length) {
+              const missed = newText.slice(fullText.length);
+              fullText = newText;
+              onDelta?.(missed);
+            }
+          }
+          continue;
+        }
+
+        if (evt.type === "session.idle" && evtSessionId === visionSessionId) {
           done = true;
           break;
         }
 
-        if (evt.type === "session.error" && evt.properties?.sessionID === visionSessionId) {
-          const errMsg = evt.properties?.error?.data?.message ?? evt.properties?.error?.name ?? "Vision error";
+        if (evt.type === "session.error" && evtSessionId === visionSessionId) {
+          const errMsg = props.error?.data?.message ?? props.error?.name ?? "Vision error";
           console.error("👁 Vision session error:", errMsg);
           done = true;
           break;
@@ -125,19 +150,24 @@ export async function processVision(
 
     // Fallback: fetch from messages API
     if (!fullText) {
-      console.log("👁 No text from events, fetching messages...");
+      console.log("👁 No text from events, fetching messages API...");
       const msgs = await client.session.messages({ path: { id: visionSessionId } } as any);
       const messagesData = (msgs as any).data ?? msgs;
       if (Array.isArray(messagesData)) {
+        console.log(`👁 Messages API returned ${messagesData.length} messages`);
         for (let i = messagesData.length - 1; i >= 0; i--) {
           const msg = messagesData[i];
-          if (msg.info?.role === "assistant") {
+          const role = msg.info?.role ?? msg.role ?? "unknown";
+          console.log(`👁 Message[${i}] role=${role}, parts=${(msg.parts ?? []).length}`);
+          if (role === "assistant") {
             for (const part of msg.parts ?? []) {
               if (part?.type === "text" && part?.text) {
+                // Skip if it's just the user query echoed
+                if (part.text.trim() === userQuery.trim()) continue;
                 fullText += part.text;
               }
             }
-            break;
+            if (fullText) break;
           }
         }
       }
