@@ -133,6 +133,7 @@ export async function chatStream(
   onDelta: (text: string) => void,
   onDone: (fullText: string) => void,
   onError: (err: Error) => void,
+  onToolResult?: (toolName: string, output: string) => void,
 ) {
   const startTime = performance.now();
 
@@ -262,10 +263,13 @@ export async function chatStream(
               const elapsed = toolStartTimes.has(toolKey)
                 ? Math.round(performance.now() - toolStartTimes.get(toolKey)!)
                 : 0;
-              const result = typeof state.output === "string"
-                ? state.output.slice(0, 200)
-                : JSON.stringify(state.output ?? "").slice(0, 200);
-              log("LLM", `[${ts()}] [TOOL:DONE] ${toolName} → ${result} (${elapsed}ms)`);
+              const fullOutput = typeof state.output === "string"
+                ? state.output
+                : JSON.stringify(state.output ?? "");
+              log("LLM", `[${ts()}] [TOOL:DONE] ${toolName} → ${fullOutput.slice(0, 200)} (${elapsed}ms)`);
+              if (onToolResult) {
+                onToolResult(toolName, fullOutput);
+              }
               toolStartTimes.delete(toolKey);
             } else if (state?.status === "error") {
               log("LLM", `[${ts()}] [TOOL:ERR] ${toolName} → ${state.error ?? "unknown error"}`);

@@ -82,10 +82,11 @@ JSON payload（如 NOTEBOOK）使用 brace-counting 解析，不受巢狀 `]` �
 - 不限美食：景點、加油站、飯店、便利商店等皆可觸發
 - 語音說「關閉地圖」→ `[ACTION:MAP_CLOSE]`
 
-### F6：工具擴充（CLI + bash）
+### F6：工具擴充（CLI + bash + MCP）
 - 透過 OpenCode 的 `bash` 工具直接呼叫外部 CLI
+- 透過 OpenCode 的 MCP Server 連接專用自動化服務
 - AI 自主判斷何時呼叫工具
-- 目前已整合：`notebooklm-py`（Google NotebookLM CLI，使用 Google 內部 RPC API）
+- 目前已整合：`notebooklm-py`（Google NotebookLM CLI）、`food-search`（OpenTable MCP Server）
 
 ### F7：螢幕截圖分析（Screen Capture）
 ```
@@ -99,6 +100,39 @@ JSON payload（如 NOTEBOOK）使用 brace-counting 解析，不受巢狀 `]` �
 - 與 CAPTURE 區分：CAPTURE = 攝像頭實體拍照，SCREENSHOT = 電腦螢幕
 - 第一次截圖需授權螢幕分享（僅一次），後續零彈窗
 - 使用者可框選重點區域並加上標註框線幫助 AI 聚焦
+
+### F8：餐廳訂位（OpenTable 自動化）
+```
+使用者: "幫我訂湯棧中山店，兩位，今晚七點"
+  → AI 載入 food-map skill
+  → MCP: search_opentable("湯棧 中山", partySize=2, date=今天, time=19:00)
+  → CDP 連接真實 Chrome → 開 OpenTable 頁面 → 擷取可訂位時段
+  → AI 選擇最佳時段 → book_opentable(slotIndex)
+  → 自動填表（姓名/電話/email）→ 提交 → 處理 auth iframe
+  → 需要簡訊驗證 → AI 請使用者提供驗證碼
+  → 使用者: "499883" → complete_booking(code="499883")
+  → 自動填入驗證碼 → 填寫詳細資料 → 完成訂位
+```
+- **MCP Server**（`services/gateway/src/food/mcp-server.cjs`）— JSON-RPC 2.0 over stdio
+- **Playwright CDP** 連接真實 Chrome（`--remote-debugging-port=9234`）
+- 保留使用者登入狀態（`--user-data-dir` 持久化 profile）
+- **Auth iframe 處理**：自動偵測 `#authenticationModalIframe` → 選國碼 → 填電話 → 驗證碼 → 詳細資料
+- **Overlay 清除**：`dismissOverlays()` 處理 cookie consent、privacy banner、ReactModal
+- 訂位人資訊存放在 `config/booking.json`
+- 由 Skill 驅動（`.opencode/skills/food-map/SKILL.md`）
+
+**MCP 工具清單：**
+| 工具 | 功能 |
+|------|------|
+| `search_restaurants` | Google Maps 搜尋餐廳評分、營業狀態 |
+| `search_opentable` | OpenTable 查詢可訂位時段（CDP 自動化） |
+| `book_opentable` | 選時段 → 填表 → 提交 → 處理 auth iframe |
+| `complete_booking` | 填入簡訊驗證碼 + 詳細資料 → 完成訂位 |
+
+**訂位三態回應：**
+- `success: true` → 訂位完成
+- `needsVerification + needsCode` → 等使用者提供簡訊驗證碼
+- `waitingForUserSubmit` → 頁面已準備好，等使用者手動確認
 
 ### F9：多會話管理（Multi-Session）
 ```
@@ -224,6 +258,12 @@ JSON payload（如 NOTEBOOK）使用 brace-counting 解析，不受巢狀 `]` �
 │  │ github-copilot │ │   Loop     │ │ (notebooklm-py    │  │
 │  │ claude-sonnet-4│ │            │ │  websearch, etc)  │  │
 │  └────────────────┘ └────────────┘ └───────────────────┘  │
+│                         │                                  │
+│                    ┌────▼──────────────────────────────┐   │
+│                    │  MCP: food-search (stdio)         │   │
+│                    │  Playwright CDP → Chrome :9234    │   │
+│                    │  (OpenTable 自動訂位)              │   │
+│                    └───────────────────────────────────┘   │
 └───────────────────────────────────────────────────────────┘
 ```
 
@@ -243,7 +283,8 @@ JSON payload（如 NOTEBOOK）使用 brace-counting 解析，不受巢狀 `]` �
 | **LLM Model** | github-copilot/claude-sonnet-4 | 免費 (Copilot) |
 | **Vision** | 同上 (Claude Sonnet 支援圖片) | 原生多模態 |
 | **攝像頭** | MediaDevices API | Web 標準 |
-| **工具系統** | OpenCode bash + CLI | AI 直接呼叫系統指令 |
+| **工具系統** | OpenCode bash + CLI + MCP | AI 直接呼叫系統指令 / MCP Server |
+| **瀏覽器自動化** | Playwright CDP | 連接真實 Chrome，保留登入狀態 |
 | **NotebookLM** | notebooklm-py (Python CLI) | Google RPC API，非 Chrome 自動化 |
 | **Monorepo** | pnpm workspace | apps/ + services/ + packages/ |
 
@@ -530,8 +571,12 @@ zerojarvis/
 │           │   └── processor.ts     # 圖片分析
 │           ├── session/
 │           │   └── manager.ts       # Session 管理
-│           └── ws/
-│               └── handler.ts       # WebSocket 訊息路由
+│           ├── ws/
+│           │   └── handler.ts       # WebSocket 訊息路由
+│           └── food/
+│               └── mcp-server.cjs   # OpenTable MCP Server (CDP)
+├── config/
+│   └── booking.json                 # 訂位人資訊（姓名/電話/email）
 ├── files/                           # 產生的檔案（git-ignored 內容）
 │   ├── captures/                    # 攝像頭截圖 (.jpg)
 │   └── notebooklm/                  # NotebookLM CLI 下載
@@ -597,7 +642,7 @@ Skills 是 Markdown 文件，定義 AI 在特定情境下的行為規則：
 ```
 .opencode/skills/
 ├── hardware-control/SKILL.md  # 攝像頭控制 (CAMERA_ON/OFF/CAPTURE)
-├── food-map/SKILL.md          # 地圖導航 (MAP/MAP_CLOSE)
+├── food-map/SKILL.md          # 地圖導航 + 餐廳訂位 (MAP/MAP_CLOSE + MCP 訂位)
 ├── screenshot/SKILL.md        # 螢幕截圖 (SCREENSHOT)
 ├── session/SKILL.md           # 多會話管理 (NEW_SESSION/SESSION_PREV/NEXT)
 ├── listen-control/SKILL.md   # 聆聽控制 (LISTEN_PAUSE/LISTEN_RESUME)
@@ -635,6 +680,7 @@ Skills 是 Markdown 文件，定義 AI 在特定情境下的行為規則：
 - [x] Per-Session 獨立狀態（每個 session 獨立 UI 快照，覆蓋層暫停/恢復）
 - [x] 聆聽控制技能（AI 可暫停/恢復 VAD）
 - [x] NotebookLM 整合（notebooklm-py CLI，問答 + 來源管理 + 內容產生 + 前端 Overlay 顯示）
+- [x] OpenTable 自動訂位（MCP Server + Playwright CDP + auth iframe 驗證流程）
 - [ ] NotebookLM 線上播放（音視訊 serve + `<audio>`/`<video>` 播放器）
 - [ ] Session 持久化（SQLite，重啟保留歷史）
 - [ ] 語音快捷指令（自訂短語對應動作）

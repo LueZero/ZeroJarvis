@@ -8,12 +8,13 @@
 
 - **零操作互動** — 頁面載入即自動聆聽，無需按鈕
 - **常駐麥克風控制** — 右下角浮動按鈕 + 鍵盤 M 鍵，隨時一鍵暫停/恢復聆聽
-- **AI Agent** — 基於 OpenCode Server + Claude，具備完整工具呼叫能力
+- **AI Agent** — 基於 OpenCode Server，具備完整工具呼叫能力
 - **多會話管理** — 無上限平行對話，語音切換「上一個/下一個/新對話」
 - **全螢幕攝像頭** — 語音觸發開啟，科幻 HUD 風格
 - **視覺分析** — 攝像頭截圖送 Vision Agent 分析
 - **螢幕截圖** — 框選截圖 + 標註工具，送 AI 視覺分析
 - **地圖功能** — AI 推薦地點後自動彈出 Google Maps
+- **餐廳訂位** — OpenTable 自動訂位（MCP Server + Chrome CDP 自動化）
 - **串流日誌** — Gateway 終端機即時顯示 AI 處理過程、工具呼叫、耗時統計
 - **Skill 系統** — AI 行為由 Skill 文件驅動，易於擴充
 - **ACTION 標記** — AI 主動控制前端（攝像頭、地圖等）
@@ -28,6 +29,7 @@
 - [pnpm](https://pnpm.io/) >= 9
 - [Bun](https://bun.sh/) >= 1.1 (Gateway server)
 - [OpenCode](https://opencode.ai/) (LLM Agent Server)
+- [Google Chrome](https://www.google.com/chrome/) (OpenTable 訂位自動化需要)
 - [uv](https://docs.astral.sh/uv/) (Python 套件管理，NotebookLM 需要)
 - [Rust](https://rustup.rs/) (Desktop 版需要，Web 版不需要)
 
@@ -102,11 +104,13 @@ ZeroJarvis/
 │   │   └── vision.md   # Vision 子 Agent
 │   └── skills/
 │       ├── hardware-control/  # 攝像頭控制技能
-│       ├── food-map/          # 地圖導航技能
+│       ├── food-map/          # 地圖導航 + 餐廳訂位技能
 │       ├── screenshot/        # 螢幕截圖技能
 │       ├── session/           # 多會話管理技能
 │       ├── listen-control/    # 聆聽控制技能
 │       └── notebooklm/        # NotebookLM 筆記本 (CLI)
+├── config/
+│   └── booking.json           # 訂位人資訊（姓名/電話/email）
 ├── start.bat / start.ps1           # Web 版啟動
 ├── start-desktop.bat / .ps1        # Desktop 版啟動
 └── docs/DESIGN.md       # 完整設計文件
@@ -280,6 +284,45 @@ notebooklm list
 | 「把這個網址加到筆記本」 | `notebooklm source add` |
 | 「產生 Podcast」 | `notebooklm generate audio` |
 
+## 餐廳訂位（OpenTable 自動化）
+
+透過 MCP Server + Playwright CDP 連接真實 Chrome 瀏覽器，實現 OpenTable 全自動訂位。
+
+### 功能
+
+- **餐廳搜尋** — Google Maps 搜尋餐廳評分、營業狀態
+- **時段查詢** — OpenTable 查詢可訂位時段
+- **自動訂位** — 選時段 → 填表 → 提交 → 處理驗證
+- **簡訊驗證** — 自動填電話 → 使用者回報驗證碼 → 自動完成
+
+### 設定
+
+訂位人資訊存放在 `config/booking.json`：
+
+```json
+{
+  "user": {
+    "firstName": "名字",
+    "lastName": "姓氏",
+    "phone": "0912345678",
+    "email": "you@example.com",
+    "countryCode": "TW"
+  },
+  "booking": {
+    "defaultPartySize": 2,
+    "verificationTimeoutMs": 120000
+  }
+}
+```
+
+### 語音觸發範例
+
+| 語音指令 | AI 行為 |
+|---------|--------|
+| 「幫我訂湯棧中山店，兩位，今晚七點」 | 搜尋 → 選時段 → 自動訂位 |
+| 「附近有什麼好吃的」 | Google Maps 搜尋 + 地圖 |
+| 「499883」（驗證碼） | 自動填入驗證碼完成訂位 |
+
 ## 疑難排解
 
 | 問題 | 解法 |
@@ -292,6 +335,8 @@ notebooklm list
 | Desktop: cargo not found | 安裝 Rust: https://rustup.rs ，重開終端 |
 | Desktop: title 錯誤 | `tauri.conf.json` 的 `app` 層不可有 `title`，標題在 `windows[0].title` |
 | 第一次 Desktop 很慢 | 正常，Rust 編譯約 2-3 分鐘，之後增量 build 很快 |
+| OpenTable 訂位卡住 | 確認 Chrome 未在其他地方開啟 CDP port 9234 |
+| 訂位驗證失敗 | 確認 `config/booking.json` 中電話號碼正確 |
 
 ## License
 

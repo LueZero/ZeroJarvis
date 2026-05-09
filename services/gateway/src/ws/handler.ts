@@ -233,6 +233,7 @@ export function handleWebSocket() {
                   log("LLM", `Response: "${cleanText.slice(0, 80)}..."`);
                   send(ws, { type: "llm_done", text: cleanText });
                   for (const a of actions) {
+                    log("ACTION", `Sending action: ${a.action} payload="${(a.payload || "").slice(0, 40)}"`);
                     send(ws, { type: "action", action: a.action, payload: a.payload });
                   }
                 } else {
@@ -241,6 +242,22 @@ export function handleWebSocket() {
                 sendSessionList(ws);
               },
               (err) => { throw err; },
+              (toolName, output) => {
+                if (toolName.includes("search_restaurants")) {
+                  try {
+                    const data = JSON.parse(output);
+                    send(ws, { type: "food_results", data } as any);
+                    log("FOOD", `MCP tool returned ${data.restaurants?.length ?? 0} restaurants`);
+                  } catch {}
+                }
+                if (toolName.includes("search_opentable")) {
+                  try {
+                    const data = JSON.parse(output);
+                    send(ws, { type: "opentable_results", data } as any);
+                    log("OPENTABLE", `MCP tool returned ${data.results?.length ?? 0} restaurants, found=${data.found}`);
+                  } catch {}
+                }
+              },
             );
 
             const llmTime = Math.round(performance.now() - textPipelineStart);
@@ -322,6 +339,22 @@ export function handleWebSocket() {
                 sendSessionList(ws);
               },
               (err) => { throw err; },
+              (toolName, output) => {
+                if (toolName.includes("search_restaurants")) {
+                  try {
+                    const data = JSON.parse(output);
+                    send(ws, { type: "food_results", data } as any);
+                    log("FOOD", `MCP tool returned ${data.restaurants?.length ?? 0} restaurants`);
+                  } catch {}
+                }
+                if (toolName.includes("search_opentable")) {
+                  try {
+                    const data = JSON.parse(output);
+                    send(ws, { type: "opentable_results", data } as any);
+                    log("OPENTABLE", `MCP tool returned ${data.results?.length ?? 0} restaurants, found=${data.found}`);
+                  } catch {}
+                }
+              },
             );
 
             // TTS only if still active session
@@ -626,13 +659,23 @@ export async function processAudio(ws: ServerWebSocket<WSData>) {
   const llmStart = performance.now();
   try {
     let fullText = "";
+    let suppressDelta = false;
     await chatStream(
       rawText,
       managedSessionId,
       (delta) => {
         fullText += delta;
-        if (sessionManager.getActiveId() === managedSessionId) {
-          send(ws, { type: "llm_delta", text: delta });
+        if (sessionManager.getActiveId() === managedSessionId && !suppressDelta) {
+          if (fullText.includes("[ACTION:")) {
+            suppressDelta = true;
+            const actionIdx = fullText.indexOf("[ACTION:");
+            const alreadySent = fullText.length - delta.length;
+            if (actionIdx > alreadySent) {
+              send(ws, { type: "llm_delta", text: delta.slice(0, actionIdx - alreadySent) });
+            }
+          } else {
+            send(ws, { type: "llm_delta", text: delta });
+          }
         }
       },
       (text) => {
@@ -646,6 +689,7 @@ export async function processAudio(ws: ServerWebSocket<WSData>) {
           log("LLM", `Response: "${cleanText.slice(0, 80)}..."`);
           send(ws, { type: "llm_done", text: cleanText });
           for (const a of actions) {
+            log("ACTION", `Sending action: ${a.action} payload="${(a.payload || "").slice(0, 40)}"`);
             send(ws, { type: "action", action: a.action, payload: a.payload });
           }
         } else {
@@ -656,6 +700,22 @@ export async function processAudio(ws: ServerWebSocket<WSData>) {
       },
       (err) => {
         throw err;
+      },
+      (toolName, output) => {
+        if (toolName.includes("search_restaurants")) {
+          try {
+            const data = JSON.parse(output);
+            send(ws, { type: "food_results", data } as any);
+            log("FOOD", `MCP tool returned ${data.restaurants?.length ?? 0} restaurants`);
+          } catch {}
+        }
+        if (toolName.includes("search_opentable")) {
+          try {
+            const data = JSON.parse(output);
+            send(ws, { type: "opentable_results", data } as any);
+            log("OPENTABLE", `MCP tool returned ${data.results?.length ?? 0} restaurants, found=${data.found}`);
+          } catch {}
+        }
       },
     );
 

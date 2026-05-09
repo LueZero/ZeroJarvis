@@ -7,6 +7,7 @@
   import CameraPreview from "./CameraPreview.svelte";
   import MapOverlay from "./MapOverlay.svelte";
   import NotebookOverlay from "./NotebookOverlay.svelte";
+  import BookingPanel from "./BookingPanel.svelte";
   import SessionTabs from "./SessionTabs.svelte";
   import ScreenCaptureTool from "./ScreenCaptureTool.svelte";
   import {
@@ -24,6 +25,11 @@
     getMapQuery,
     setMapQuery,
     clearMapQuery,
+    getFoodData,
+    setFoodData,
+    getOpenTableData,
+    setOpenTableData,
+    clearOpenTableData,
     getNotebookContent,
     setNotebookContent,
     clearNotebookContent,
@@ -216,6 +222,12 @@
         break;
       case "session_done":
         updateSessionDone((msg as any).sessionId, (msg as any).text);
+        break;
+      case "food_results":
+        setFoodData((msg as any).data);
+        break;
+      case "opentable_results":
+        setOpenTableData((msg as any).data);
         break;
       case "error":
         setError(msg.message);
@@ -537,12 +549,17 @@
 
   <!-- Map overlay (triggered by [ACTION:MAP:query]) -->
   {#if getMapQuery()}
-    <MapOverlay query={getMapQuery()} onClose={clearMapQuery} />
+    <MapOverlay query={getMapQuery()} foodData={getFoodData()} onClose={clearMapQuery} />
   {/if}
 
   <!-- NotebookLM overlay (triggered by [ACTION:NOTEBOOK:json]) -->
   {#if getNotebookContent()}
     <NotebookOverlay bind:this={notebookRef} content={getNotebookContent()!} onClose={() => { clearNotebookContent(); send({ type: "notebook_state", active: false } as any); }} />
+  {/if}
+
+  <!-- OpenTable booking panel -->
+  {#if getOpenTableData()}
+    <BookingPanel data={getOpenTableData()!} onClose={clearOpenTableData} />
   {/if}
 
   <!-- Subtitle overlay (bottom, does not push layout) -->

@@ -12,7 +12,10 @@
     "@opencode-ai/sdk": "^1.14.33",
     "@zerojarvis/shared": "workspace:*",
     "hono": "^4.7.0",
-    "msedge-tts": "^2.0.5"
+    "msedge-tts": "^2.0.5",
+    "playwright": "^1.59.1",
+    "playwright-extra": "^4.3.6",
+    "puppeteer-extra-plugin-stealth": "^2.11.2"
   },
   "devDependencies": {
     "@types/bun": "latest",

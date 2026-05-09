@@ -35,6 +35,8 @@ export type ServerMessage =
   | { type: "action"; action: string; payload?: string }
   | { type: "state"; state: AgentState }
   | { type: "error"; message: string }
+  | { type: "food_results"; data: FoodSearchData }
+  | { type: "opentable_results"; data: OpenTableResult }
   // Multi-Session (F9)
   | { type: "session_list"; sessions: SessionTab[] }
   | { type: "session_switch"; sessionId: string; state: SessionSnapshot }
@@ -128,6 +130,51 @@ export const DEFAULT_CONFIG: UserConfig = {
   visionModel: "openai/gpt-4o",
   language: "zh-TW",
 };
+
+// --- Restaurant / Food Search ---
+export interface RestaurantInfo {
+  name: string;
+  rating: number;
+  reviews: number;
+  priceRange: string;
+  cuisine: string;
+  address: string;
+  status: string;
+  mapsUrl?: string;
+}
+
+export interface FoodSearchData {
+  query: string;
+  restaurants: RestaurantInfo[];
+  searchedAt: string;
+}
+
+// --- OpenTable Reservation ---
+export interface OpenTableSlot {
+  time: string;
+  bookingUrl: string;
+}
+
+export interface OpenTableRestaurant {
+  name: string;
+  rating: string;
+  meta: string;
+  slots: OpenTableSlot[];
+  pageUrl: string;
+}
+
+export interface OpenTableResult {
+  restaurant: string;
+  found: boolean;
+  results: OpenTableRestaurant[];
+  searchUrl: string;
+  noResults?: boolean;
+  date: string;
+  time: string;
+  partySize: number;
+  error?: string;
+  searchedAt: string;
+}
 
 // --- NotebookLM Content Display ---
 export type NotebookContentType = "markdown" | "mindmap" | "quiz" | "flashcards" | "media" | "table";

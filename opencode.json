@@ -10,6 +10,13 @@
     "webfetch": "allow",
     "websearch": "allow"
   },
+  "mcp": {
+    "food-search": {
+      "type": "local",
+      "command": ["node", "D:/ZeroJarvis/services/gateway/src/food/mcp-server.cjs"],
+      "enabled": true
+    }
+  },
   "tools": {
     "write": true,
     "edit": true,

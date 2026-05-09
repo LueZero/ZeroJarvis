@@ -1,0 +1,13 @@
+{
+  "user": {
+    "firstName": "倫嘉",
+    "lastName": "劉",
+    "phone": "0970937127",
+    "email": "a0970937127@gmail.com",
+    "countryCode": "TW"
+  },
+  "booking": {
+    "defaultPartySize": 2,
+    "verificationTimeoutMs": 120000
+  }
+}

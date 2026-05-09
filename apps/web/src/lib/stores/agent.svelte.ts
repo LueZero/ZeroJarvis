@@ -7,7 +7,7 @@
  * On switch: save current $state → Map, load target Map → $state.
  */
 
-import type { AgentState, PolishResult, ChatMessage, SessionTab, SessionSnapshot, NotebookContent } from "@zerojarvis/shared";
+import type { AgentState, PolishResult, ChatMessage, SessionTab, SessionSnapshot, NotebookContent, FoodSearchData, OpenTableResult } from "@zerojarvis/shared";
 
 // --- Per-Session Snapshot (stored for inactive sessions) ---
 interface SessionState {
@@ -29,6 +29,8 @@ let currentPolish = $state<PolishResult | null>(null);
 let currentLlmText = $state("");
 let isCameraOn = $state(false);
 let mapQuery = $state("");
+let foodData = $state<FoodSearchData | null>(null);
+let opentableData = $state<OpenTableResult | null>(null);
 let notebookContent = $state<NotebookContent | null>(null);
 let error = $state<string | null>(null);
 let messages = $state<ChatMessage[]>([]);
@@ -162,6 +164,27 @@ export function setMapQuery(q: string) {
 
 export function clearMapQuery() {
   mapQuery = "";
+  foodData = null;
+}
+
+export function getFoodData(): FoodSearchData | null {
+  return foodData;
+}
+
+export function setFoodData(data: FoodSearchData | null) {
+  foodData = data;
+}
+
+export function getOpenTableData(): OpenTableResult | null {
+  return opentableData;
+}
+
+export function setOpenTableData(data: OpenTableResult | null) {
+  opentableData = data;
+}
+
+export function clearOpenTableData() {
+  opentableData = null;
 }
 
 export function setNotebookContent(c: NotebookContent | null) {

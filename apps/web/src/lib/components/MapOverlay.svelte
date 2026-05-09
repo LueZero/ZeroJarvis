@@ -3,16 +3,30 @@
    * Full-screen map overlay — Sci-fi HUD style (matches CameraPreview)
    * Triggered by [ACTION:MAP:query] from AI
    */
+  import type { FoodSearchData, RestaurantInfo } from "@zerojarvis/shared";
+  import RestaurantPanel from "./RestaurantPanel.svelte";
+
   interface Props {
     query: string;
+    foodData?: FoodSearchData | null;
     onClose: () => void;
   }
 
-  let { query, onClose }: Props = $props();
+  let { query, foodData = null, onClose }: Props = $props();
   let loaded = $state(false);
 
+  let activeQuery = $state(query);
+  let selectedName = $state("");
+  $effect(() => { activeQuery = query; });
+
+  function handleRestaurantSelect(restaurant: RestaurantInfo) {
+    selectedName = restaurant.name;
+    loaded = false;
+    activeQuery = restaurant.name + (restaurant.address ? " " + restaurant.address : "");
+  }
+
   const mapUrl = $derived(
-    `https://www.google.com/maps?q=${encodeURIComponent(query)}&z=14&iwloc=B&output=embed`
+    `https://www.google.com/maps?q=${encodeURIComponent(activeQuery)}&z=${selectedName ? 17 : 14}&iwloc=B&output=embed`
   );
 </script>
 
@@ -77,6 +91,11 @@
     <div class="data-bar short"></div>
     <div class="data-bar"></div>
   </div>
+
+  <!-- Restaurant results panel -->
+  {#if foodData && foodData.restaurants.length > 0}
+    <RestaurantPanel data={foodData} selectedName={selectedName} onSelect={handleRestaurantSelect} />
+  {/if}
 
   <!-- Bottom hint -->
   <div class="hud-bottom">
@@ -352,4 +371,6 @@
     50% { opacity: 0.7; }
     100% { opacity: 0.3; }
   }
+
+
 </style>
