@@ -1,0 +1,7 @@
+# GitHub Linguist overrides
+# Exclude community skills from language statistics (contains Python/XSD from skills.sh)
+.agents/skills/** linguist-vendored
+
+# Ensure TypeScript is detected as primary language
+*.ts linguist-language=TypeScript
+*.svelte linguist-language=Svelte

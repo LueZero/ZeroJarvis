@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/assets/logo.png" alt="ZeroJarvis" width="120" style="border-radius: 50%; object-fit: cover;" />
+  <img src="docs/assets/logo.png" alt="ZeroJarvis" width="120" />
 </p>
 
 <h1 align="center">ZeroJarvis</h1>
