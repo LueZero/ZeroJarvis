@@ -637,10 +637,11 @@ Desktop 版載入 Web UI（https://localhost:3000），額外支援：
 
 ## 11. Skill 系統
 
-Skills 是 Markdown 文件，定義 AI 在特定情境下的行為規則：
+Skills 是 Markdown 文件，定義 AI 在特定情境下的行為規則。
+分為**自訂技能**（ZeroJarvis 專屬）與**社群技能**（來自 [skills.sh](https://skills.sh/) 生態系），分別存放在不同路徑：
 
 ```
-.opencode/skills/
+.opencode/skills/              ← 自訂技能（ZeroJarvis 專屬）
 ├── hardware-control/SKILL.md  # 攝像頭控制 (CAMERA_ON/OFF/CAPTURE)
 ├── food-map/SKILL.md          # 地圖導航 + 餐廳訂位 (MAP/MAP_CLOSE + MCP 訂位)
 ├── screenshot/SKILL.md        # 螢幕截圖 (SCREENSHOT)
@@ -649,9 +650,41 @@ Skills 是 Markdown 文件，定義 AI 在特定情境下的行為規則：
 └── notebooklm/SKILL.md       # NotebookLM 完整操作 (NOTEBOOK/NOTEBOOK_CLOSE)
                                #   問答、來源、產生、下載、筆記、分享
                                #   + 6 種 overlay 渲染（報告/心智圖/測驗/學習卡/媒體/表格）
+
+.agents/skills/                ← 社群技能（skills.sh 安裝）
+├── find-skills/SKILL.md       # 自動搜尋並安裝新技能 (vercel-labs/skills)
+├── skill-creator/SKILL.md     # 建立/改善自訂 SKILL.md (anthropics/skills)
+├── mcp-builder/SKILL.md       # 建立高品質 MCP Server (anthropics/skills)
+├── claude-api/SKILL.md        # Claude API/SDK 最佳實踐 (anthropics/skills)
+├── frontend-design/SKILL.md   # 高品質前端 UI 設計 (anthropics/skills)
+├── web-design-guidelines/SKILL.md # UI/UX 最佳實踐審查 (vercel-labs/agent-skills)
+├── pdf/SKILL.md               # PDF 讀寫處理 (anthropics/skills)
+├── docx/SKILL.md              # Word 文件處理 (anthropics/skills)
+└── xlsx/SKILL.md              # Excel 試算表處理 (anthropics/skills)
 ```
 
-新增功能的步驟：
+OpenCode 會自動從 `.opencode/skills/` 和 `.agents/skills/` 兩個路徑發現技能。
+
+### 社群技能管理（skills.sh CLI）
+
+透過 [skills.sh](https://skills.sh/) 開源生態系安裝社群技能（自動安裝到 `.agents/skills/`）：
+
+```bash
+# 安裝技能
+npx skills add <owner/repo> --skill <name> -a opencode -y
+
+# 列出可用技能
+npx skills add <owner/repo> --list -a opencode
+
+# 列出已安裝 / 搜尋 / 更新 / 移除
+npx skills list
+npx skills find <keyword>
+npx skills update
+npx skills remove <name>
+```
+
+### 新增功能的步驟
+
 1. 撰寫 `.opencode/skills/新功能/SKILL.md` — 定義 AI 行為
 2. 在 `.opencode/agents/jarvis.md` 引用新 skill
 3. 若需前端互動：在 `HUD.svelte` 的 `handleAction()` 新增 case
@@ -681,6 +714,7 @@ Skills 是 Markdown 文件，定義 AI 在特定情境下的行為規則：
 - [x] 聆聽控制技能（AI 可暫停/恢復 VAD）
 - [x] NotebookLM 整合（notebooklm-py CLI，問答 + 來源管理 + 內容產生 + 前端 Overlay 顯示）
 - [x] OpenTable 自動訂位（MCP Server + Playwright CDP + auth iframe 驗證流程）
+- [x] 社群技能整合（skills.sh 生態系 — find-skills / skill-creator / mcp-builder / claude-api 等 9 個技能）
 - [ ] NotebookLM 線上播放（音視訊 serve + `<audio>`/`<video>` 播放器）
 - [ ] Session 持久化（SQLite，重啟保留歷史）
 - [ ] 語音快捷指令（自訂短語對應動作）
