@@ -93,11 +93,10 @@ export function startVAD() {
 export function stopVAD() {
   console.log("VAD | ⏸️ pause() called, speechInProgress:", speechInProgress);
   vadActive = false;
-  // pause() may synchronously trigger onSpeechEnd via submitUserSpeechOnPause
-  // speechInProgress flag ensures only legitimate buffered speech goes through
+  // pause() triggers onSpeechEnd asynchronously via AudioWorklet (submitUserSpeechOnPause).
+  // Do NOT clear speechInProgress here — let onSpeechEnd handle it naturally,
+  // otherwise the async callback sees speechInProgress=false and discards legitimate audio.
   vadInstance?.pause();
-  // After pause returns, clear speechInProgress to block any further stale events
-  speechInProgress = false;
 }
 
 export function isVADActive(): boolean {

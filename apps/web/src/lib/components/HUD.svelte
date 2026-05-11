@@ -167,8 +167,8 @@
           // Ensure VAD is stopped during AI speech
           stopVAD();
         }
-        if (msg.state === "idle" && listening && !listenPaused && vadReady) {
-          // Check for buffered audio captured while AI was busy
+        if (msg.state === "idle") {
+          // Always flush pending audio (even if user paused mic — speech was already captured)
           if (pendingAudio) {
             console.log("HUD | idle — sending buffered audio");
             const buf = pendingAudio;
@@ -176,9 +176,8 @@
             setState("thinking");
             setSttText("辨識中...");
             sendBinary(buf);
-          } else if (!isPlaying()) {
-            // Only restart VAD on idle if NOT about to play audio
-            // (tts_end will handle restart after audio playback)
+          } else if (listening && !listenPaused && vadReady && !isPlaying()) {
+            // Only restart VAD if mic is on and not about to play audio
             startVAD();
             setSttText("");
           }
@@ -207,18 +206,16 @@
           // Audio finished — always go idle, only restart VAD if not paused
           setState("idle");
           setSttText("");
-          if (listening && !listenPaused && vadReady) {
-            // Check for buffered audio first
-            if (pendingAudio) {
-              console.log("HUD | TTS done — sending buffered audio");
-              const buf = pendingAudio;
-              pendingAudio = null;
-              setState("thinking");
-              setSttText("辨識中...");
-              sendBinary(buf);
-            } else {
-              startVAD();
-            }
+          // Always flush pending audio (even if mic paused — speech was already captured)
+          if (pendingAudio) {
+            console.log("HUD | TTS done — sending buffered audio");
+            const buf = pendingAudio;
+            pendingAudio = null;
+            setState("thinking");
+            setSttText("辨識中...");
+            sendBinary(buf);
+          } else if (listening && !listenPaused && vadReady) {
+            startVAD();
           }
         }).catch((err) => {
           console.error("TTS playback failed:", err);
@@ -237,7 +234,15 @@
         if (!audioPlaying && !isPlaying()) {
           setState("idle");
           setSttText("");
-          if (listening && !listenPaused && vadReady) {
+          // Flush pending audio first, then consider restarting VAD
+          if (pendingAudio) {
+            console.log("HUD | tts_end — sending buffered audio");
+            const buf = pendingAudio;
+            pendingAudio = null;
+            setState("thinking");
+            setSttText("辨識中...");
+            sendBinary(buf);
+          } else if (listening && !listenPaused && vadReady) {
             startVAD();
           }
         }
