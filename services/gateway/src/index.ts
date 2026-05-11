@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { resolve, join } from "node:path";
 import { GATEWAY_PORT, API_PREFIX, WS_PATH } from "@zerojarvis/shared";
-import { handleWebSocket } from "./ws/handler.js";
+import { handleWebSocket, startBackgroundSystems } from "./ws/handler.js";
 import { log } from "./logger.js";
 
 const app = new Hono();
@@ -50,9 +50,12 @@ app.post(`${API_PREFIX}/polish`, async (c) => {
 app.post(`${API_PREFIX}/chat`, async (c) => {
   const { message } = await c.req.json<{ message: string }>();
   const { chatStream } = await import("./llm/opencode.js");
+  const { ensureSession } = await import("./session/manager.js");
+  const session = ensureSession();
   let result = "";
   await chatStream(
     message,
+    session.id,
     (delta) => { result += delta; },
     (text) => { result = text; },
     (err) => { throw err; },
@@ -71,6 +74,11 @@ app.post(`${API_PREFIX}/vision`, async (c) => {
 log("GATEWAY", `ZeroJarvis Gateway starting on port ${GATEWAY_PORT}`);
 
 const wsHandler = handleWebSocket();
+
+// Start background systems (EventHub, Scheduler) after server is ready
+startBackgroundSystems().catch(err => {
+  log("GATEWAY", `[WARN] Background systems startup delayed: ${err.message}`);
+});
 
 export default {
   port: GATEWAY_PORT,

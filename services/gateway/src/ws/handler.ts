@@ -1,12 +1,16 @@
 import type { ServerWebSocket } from "bun";
 import type { ClientMessage, ServerMessage, AgentState, NotebookContentType } from "@zerojarvis/shared";
 import { transcribe } from "../stt/whisper.js";
-import { chatStream, resetSession, parseActions } from "../llm/opencode.js";
+import { chatStream, resetSession, parseActions, parseAsyncTask, parseSchedule, parseScheduleRepeat } from "../llm/opencode.js";
 import { processVision } from "../vision/processor.js";
 import { synthesize } from "../tts/edge-tts.js";
 import { polish } from "../polish/polisher.js";
 import { log, logWarn, logError } from "../logger.js";
 import * as sessionManager from "../session/manager.js";
+import * as taskQueue from "../task/queue.js";
+import * as taskWorker from "../task/worker.js";
+import * as scheduler from "../task/scheduler.js";
+import * as eventHub from "../task/event-hub.js";
 
 interface WSData {
   id: string;
@@ -109,6 +113,51 @@ function sendSessionList(ws: ServerWebSocket<WSData>) {
   send(ws, { type: "session_list", sessions: sessionManager.getAllTabs() } as any);
 }
 
+/** Active WebSocket connection (single-client model) */
+let activeWs: ServerWebSocket<WSData> | null = null;
+
+/** Start background systems (EventHub, Scheduler, Task notifications) */
+export async function startBackgroundSystems(): Promise<void> {
+  // Start global SSE event hub
+  await eventHub.start();
+  log("INIT", "EventHub started");
+
+  // Start scheduler
+  scheduler.start();
+  log("INIT", "Scheduler started");
+
+  // Listen for task completions and notify client
+  taskQueue.onDone(async (task) => {
+    if (!activeWs) return;
+    const ws = activeWs;
+
+    if (task.status === "done" && task.result) {
+      log("TASK_NOTIFY", `Task ${task.id.slice(0, 8)} done, notifying client`);
+      send(ws, { type: "task_done", taskId: task.id, text: task.result } as any);
+
+      // TTS: speak the result — interrupt if user is just passively listening
+      const canSpeak = !ws.data.processing;
+      log("TASK_NOTIFY", `State=${ws.data.state} processing=${ws.data.processing} canSpeak=${canSpeak}`);
+      if (canSpeak) {
+        try {
+          setState(ws, "speaking");
+          const audioData = await synthesize(task.result);
+          ws.send(audioData);
+          send(ws, { type: "tts_end" });
+          setState(ws, "idle");
+        } catch (ttsErr) {
+          logWarn("TASK_NOTIFY", `TTS failed for task result: ${ttsErr}`);
+          setState(ws, "idle");
+        }
+      } else {
+        log("TASK_NOTIFY", `Skipped TTS — user is busy`);
+      }
+    } else if (task.status === "error") {
+      send(ws, { type: "task_error", taskId: task.id, error: task.error ?? "未知錯誤" } as any);
+    }
+  });
+}
+
 export function handleWebSocket() {
   return {
     open(ws: ServerWebSocket<WSData>) {
@@ -123,6 +172,7 @@ export function handleWebSocket() {
         notebookType: null,
       };
       log("WS", `Client connected: ${ws.data.id}`);
+      activeWs = ws; // Track active connection for task notifications
       // Ensure at least one session exists
       sessionManager.ensureSession();
       setState(ws, "idle");
@@ -208,14 +258,15 @@ export function handleWebSocket() {
               (delta) => {
                 fullText += delta;
                 if (sessionManager.getActiveId() === managedId && !suppressDelta) {
-                  // Check if we've hit an ACTION tag in the accumulated text
-                  if (fullText.includes("[ACTION:")) {
+                  // Check if we've hit an ACTION tag or ASYNC_TASK tag in the accumulated text
+                  if (fullText.includes("[ACTION:") || fullText.includes("[ASYNC_TASK:") || fullText.includes("[SCHEDULE:") || fullText.includes("[SCHEDULE_REPEAT:")) {
                     suppressDelta = true;
-                    // Send the clean part before ACTION (minus what was already sent)
-                    const actionIdx = fullText.indexOf("[ACTION:");
+                    const tagIdx = Math.min(
+                      ...[fullText.indexOf("[ACTION:"), fullText.indexOf("[ASYNC_TASK:"), fullText.indexOf("[SCHEDULE:"), fullText.indexOf("[SCHEDULE_REPEAT:")].filter(i => i >= 0)
+                    );
                     const alreadySent = fullText.length - delta.length;
-                    if (actionIdx > alreadySent) {
-                      send(ws, { type: "llm_delta", text: delta.slice(0, actionIdx - alreadySent) });
+                    if (tagIdx > alreadySent) {
+                      send(ws, { type: "llm_delta", text: delta.slice(0, tagIdx - alreadySent) });
                     }
                   } else {
                     send(ws, { type: "llm_delta", text: delta });
@@ -227,18 +278,60 @@ export function handleWebSocket() {
                 sessionManager.setLastText(managedId, text);
                 sessionManager.setStatus(managedId, "done");
 
-                const { cleanText, actions } = parseActions(fullText);
+                // Parse all marker types
+                let processedText = fullText;
+                const { cleanText: t1, actions } = parseActions(processedText);
+                processedText = t1;
+                const { cleanText: t2, taskDescription } = parseAsyncTask(processedText);
+                processedText = t2;
+                const { cleanText: t3, schedule } = parseSchedule(processedText);
+                processedText = t3;
+                const { cleanText: finalText, repeat } = parseScheduleRepeat(processedText);
 
                 if (sessionManager.getActiveId() === managedId) {
-                  log("LLM", `Response: "${cleanText.slice(0, 80)}..."`);
-                  send(ws, { type: "llm_done", text: cleanText });
+                  log("LLM", `Response: "${finalText.slice(0, 80)}..."`);
+                  send(ws, { type: "llm_done", text: finalText });
                   for (const a of actions) {
                     log("ACTION", `Sending action: ${a.action} payload="${(a.payload || "").slice(0, 40)}"`);
                     send(ws, { type: "action", action: a.action, payload: a.payload });
                   }
                 } else {
-                  send(ws, { type: "session_done", sessionId: managedId, text: cleanText } as any);
+                  send(ws, { type: "session_done", sessionId: managedId, text: finalText } as any);
                 }
+
+                // ── Async Task dispatch ──
+                if (taskDescription) {
+                  log("TASK", `AI requested async task: "${taskDescription}"`);
+                  const task = taskQueue.createTask({
+                    prompt: taskDescription,
+                    originalPrompt: msg.text,
+                    parentSessionId: managedId,
+                    type: "async",
+                  });
+                  send(ws, { type: "task_created", taskId: task.id, description: taskDescription } as any);
+                  // Dispatch to worker (fire-and-forget)
+                  taskWorker.execute(task).catch(err => {
+                    logError("TASK", `Worker dispatch failed: ${err}`);
+                  });
+                }
+
+                // ── Schedule dispatch ──
+                if (schedule) {
+                  const scheduledAt = new Date(schedule.time).getTime();
+                  if (!isNaN(scheduledAt)) {
+                    log("SCHEDULER", `Scheduling task at ${schedule.time}: "${schedule.prompt}"`);
+                    const schedTask = scheduler.scheduleOnce(schedule.prompt, scheduledAt, managedId);
+                    send(ws, { type: "task_created", taskId: schedTask.id, description: `排程：${schedule.prompt}` } as any);
+                  }
+                }
+
+                // ── Repeat schedule dispatch ──
+                if (repeat) {
+                  log("SCHEDULER", `Scheduling repeat (${repeat.freq} ${repeat.time}): "${repeat.prompt}"`);
+                  const repTask = scheduler.scheduleRepeat(repeat.prompt, repeat.time, repeat.freq, managedId);
+                  send(ws, { type: "task_created", taskId: repTask.id, description: `重複排程：${repeat.prompt}` } as any);
+                }
+
                 sendSessionList(ws);
               },
               (err) => { throw err; },
@@ -261,18 +354,25 @@ export function handleWebSocket() {
             );
 
             const llmTime = Math.round(performance.now() - textPipelineStart);
-            const { cleanText, actions } = parseActions(fullText);
+
+            // Re-parse to get final clean text for TTS (all markers already processed in onDone)
+            let ttsText = fullText;
+            ttsText = parseActions(ttsText).cleanText;
+            ttsText = parseAsyncTask(ttsText).cleanText;
+            ttsText = parseSchedule(ttsText).cleanText;
+            ttsText = parseScheduleRepeat(ttsText).cleanText;
 
             // TTS (only if still active session)
-            if (cleanText && sessionManager.getActiveId() === managedId) {
+            if (ttsText && sessionManager.getActiveId() === managedId) {
               setState(ws, "speaking");
               const ttsStart = performance.now();
               try {
-                const audioData = await synthesize(cleanText);
+                const audioData = await synthesize(ttsText);
                 const ttsTime = Math.round(performance.now() - ttsStart);
                 log("TTS", `Synthesized ${audioData.byteLength} bytes (${ttsTime}ms)`);
                 ws.send(audioData);
                 send(ws, { type: "tts_end" });
+                ws.data.state = "idle";
                 log("TIMING", `stt=0ms llm=${llmTime}ms tts=${ttsTime}ms total=${Math.round(performance.now() - textPipelineStart)}ms`);
               } catch (ttsErr) {
                 logWarn("TTS", `Failed: ${ttsErr}`);
@@ -365,6 +465,7 @@ export function handleWebSocket() {
                 const audioData = await synthesize(cleanText);
                 ws.send(audioData);
                 send(ws, { type: "tts_end" });
+                ws.data.state = "idle";
               } else {
                 setState(ws, "idle");
               }
@@ -404,6 +505,7 @@ export function handleWebSocket() {
               const audioData = await synthesize(cleanText);
               ws.send(audioData);
               send(ws, { type: "tts_end" });
+              ws.data.state = "idle";
             } else {
               setState(ws, "idle");
             }
@@ -457,6 +559,7 @@ export function handleWebSocket() {
               log("SCREENSHOT", `TTS done (${audioData.byteLength} bytes), sending audio`);
               ws.send(audioData);
               send(ws, { type: "tts_end" });
+              ws.data.state = "idle";
             } else {
               setState(ws, "idle");
             }
@@ -517,6 +620,7 @@ export function handleWebSocket() {
 
     close(ws: ServerWebSocket<WSData>) {
       log("WS", `Client disconnected: ${ws.data.id}`);
+      if (activeWs === ws) activeWs = null;
     },
   };
 }
@@ -579,6 +683,7 @@ function handleSessionCommand(ws: ServerWebSocket<WSData>, cmd: "new" | "prev" |
       setState(ws, "speaking");
       ws.send(audio);
       send(ws, { type: "tts_end" });
+      ws.data.state = "idle";
     }).catch(() => {
       setState(ws, "idle");
     });
@@ -666,12 +771,14 @@ export async function processAudio(ws: ServerWebSocket<WSData>) {
       (delta) => {
         fullText += delta;
         if (sessionManager.getActiveId() === managedSessionId && !suppressDelta) {
-          if (fullText.includes("[ACTION:")) {
+          if (fullText.includes("[ACTION:") || fullText.includes("[ASYNC_TASK:") || fullText.includes("[SCHEDULE:") || fullText.includes("[SCHEDULE_REPEAT:")) {
             suppressDelta = true;
-            const actionIdx = fullText.indexOf("[ACTION:");
+            const tagIdx = Math.min(
+              ...[fullText.indexOf("[ACTION:"), fullText.indexOf("[ASYNC_TASK:"), fullText.indexOf("[SCHEDULE:"), fullText.indexOf("[SCHEDULE_REPEAT:")].filter(i => i >= 0)
+            );
             const alreadySent = fullText.length - delta.length;
-            if (actionIdx > alreadySent) {
-              send(ws, { type: "llm_delta", text: delta.slice(0, actionIdx - alreadySent) });
+            if (tagIdx > alreadySent) {
+              send(ws, { type: "llm_delta", text: delta.slice(0, tagIdx - alreadySent) });
             }
           } else {
             send(ws, { type: "llm_delta", text: delta });
@@ -683,19 +790,59 @@ export async function processAudio(ws: ServerWebSocket<WSData>) {
         sessionManager.setLastText(managedSessionId, text);
         sessionManager.setStatus(managedSessionId, "done");
 
-        const { cleanText, actions } = parseActions(fullText);
+        // Parse all marker types
+        let processedText = fullText;
+        const { cleanText, actions } = parseActions(processedText);
+        processedText = cleanText;
+        const { cleanText: t2, taskDescription } = parseAsyncTask(processedText);
+        processedText = t2;
+        const { cleanText: t3, schedule } = parseSchedule(processedText);
+        processedText = t3;
+        const { cleanText: finalText, repeat } = parseScheduleRepeat(processedText);
 
         if (sessionManager.getActiveId() === managedSessionId) {
-          log("LLM", `Response: "${cleanText.slice(0, 80)}..."`);
-          send(ws, { type: "llm_done", text: cleanText });
+          log("LLM", `Response: "${finalText.slice(0, 80)}..."`);
+          send(ws, { type: "llm_done", text: finalText });
           for (const a of actions) {
             log("ACTION", `Sending action: ${a.action} payload="${(a.payload || "").slice(0, 40)}"`);
             send(ws, { type: "action", action: a.action, payload: a.payload });
           }
         } else {
-          // Background session done
-          send(ws, { type: "session_done", sessionId: managedSessionId, text: cleanText } as any);
+          send(ws, { type: "session_done", sessionId: managedSessionId, text: finalText } as any);
         }
+
+        // ── Async Task dispatch ──
+        if (taskDescription) {
+          log("TASK", `AI requested async task (voice): "${taskDescription}"`);
+          const task = taskQueue.createTask({
+            prompt: taskDescription,
+            originalPrompt: rawText,
+            parentSessionId: managedSessionId,
+            type: "async",
+          });
+          send(ws, { type: "task_created", taskId: task.id, description: taskDescription } as any);
+          taskWorker.execute(task).catch(err => {
+            logError("TASK", `Worker dispatch failed: ${err}`);
+          });
+        }
+
+        // ── Schedule dispatch ──
+        if (schedule) {
+          const scheduledAt = new Date(schedule.time).getTime();
+          if (!isNaN(scheduledAt)) {
+            log("SCHEDULER", `Scheduling task at ${schedule.time}: "${schedule.prompt}"`);
+            const schedTask = scheduler.scheduleOnce(schedule.prompt, scheduledAt, managedSessionId);
+            send(ws, { type: "task_created", taskId: schedTask.id, description: `排程：${schedule.prompt}` } as any);
+          }
+        }
+
+        // ── Repeat schedule dispatch ──
+        if (repeat) {
+          log("SCHEDULER", `Scheduling repeat (${repeat.freq} ${repeat.time}): "${repeat.prompt}"`);
+          const repTask = scheduler.scheduleRepeat(repeat.prompt, repeat.time, repeat.freq, managedSessionId);
+          send(ws, { type: "task_created", taskId: repTask.id, description: `重複排程：${repeat.prompt}` } as any);
+        }
+
         sendSessionList(ws);
       },
       (err) => {
@@ -720,16 +867,24 @@ export async function processAudio(ws: ServerWebSocket<WSData>) {
     );
 
     const llmTime = Math.round(performance.now() - llmStart);
-    const { cleanText, actions } = parseActions(fullText);
+
+    // Re-parse all markers for TTS and CAPTURE check
+    let ttsText = fullText;
+    const { cleanText: ct1, actions } = parseActions(ttsText);
+    ttsText = ct1;
+    ttsText = parseAsyncTask(ttsText).cleanText;
+    ttsText = parseSchedule(ttsText).cleanText;
+    ttsText = parseScheduleRepeat(ttsText).cleanText;
 
     // CAPTURE action → release lock early
     if (actions.some(a => a.action === "CAPTURE")) {
-      if (cleanText && sessionManager.getActiveId() === managedSessionId) {
+      if (ttsText && sessionManager.getActiveId() === managedSessionId) {
         setState(ws, "speaking");
         try {
-          const audioData = await synthesize(cleanText);
+          const audioData = await synthesize(ttsText);
           ws.send(audioData);
           send(ws, { type: "tts_end" });
+          ws.data.state = "idle";
         } catch {
           setState(ws, "idle");
         }
@@ -742,15 +897,16 @@ export async function processAudio(ws: ServerWebSocket<WSData>) {
     }
 
     // 3. TTS (only if still active session)
-    if (cleanText && sessionManager.getActiveId() === managedSessionId) {
+    if (ttsText && sessionManager.getActiveId() === managedSessionId) {
       setState(ws, "speaking");
       const ttsStart = performance.now();
       try {
-        const audioData = await synthesize(cleanText);
+        const audioData = await synthesize(ttsText);
         const ttsTime = Math.round(performance.now() - ttsStart);
         log("TTS", `Synthesized ${audioData.byteLength} bytes (${ttsTime}ms)`);
         ws.send(audioData);
         send(ws, { type: "tts_end" });
+        ws.data.state = "idle";
 
         // F10: Full pipeline timing
         const totalTime = Math.round(performance.now() - pipelineStart);

@@ -19,6 +19,7 @@
 import { getClient } from "./client.js";
 import { log } from "../logger.js";
 import * as sessionManager from "../session/manager.js";
+import * as eventHub from "../task/event-hub.js";
 
 /** Timestamp formatter for detailed logs */
 function ts(): string {
@@ -89,6 +90,65 @@ export function parseActions(text: string): { cleanText: string; actions: { acti
 /** Map of managedSessionId → OpenCode sessionId */
 const openCodeSessions: Map<string, string> = new Map();
 
+/** Parse [ASYNC_TASK:description] markers from LLM response */
+export function parseAsyncTask(text: string): { cleanText: string; taskDescription: string | null } {
+  const pattern = /\[ASYNC_TASK:([^\]]+)\]/g;
+  let taskDescription: string | null = null;
+  let cleanText = text;
+
+  const match = pattern.exec(text);
+  if (match) {
+    taskDescription = match[1].trim();
+    cleanText = text.slice(0, match.index) + text.slice(match.index + match[0].length);
+    cleanText = cleanText.trim();
+  } else {
+    // Fallback: strip any malformed [ASYNC_TASK:...] markers
+    cleanText = text.replace(/\[ASYNC_TASK:[^\]]*\]/g, "").trim();
+  }
+  return { cleanText, taskDescription };
+}
+
+/** Parse [SCHEDULE:ISO_TIME:description] markers from LLM response.
+ *  ISO times contain colons (e.g. 2026-05-11T15:00:00), so we match the time part
+ *  with a specific date-time pattern first, then the description after the last colon. */
+export function parseSchedule(text: string): { cleanText: string; schedule: { time: string; prompt: string } | null } {
+  // Match ISO datetime (with or without seconds, timezone), then optionally :description
+  const pattern = /\[SCHEDULE:(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2})?(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})?)(?::([^\]]+))?\]/g;
+  let schedule: { time: string; prompt: string } | null = null;
+  let cleanText = text;
+
+  const match = pattern.exec(text);
+  if (match) {
+    const time = match[1].trim();
+    const prompt = match[2]?.trim() || "排程任務";
+    schedule = { time, prompt };
+    cleanText = text.slice(0, match.index) + text.slice(match.index + match[0].length);
+    cleanText = cleanText.trim();
+  } else {
+    // Fallback: strip any malformed [SCHEDULE:...] markers so TTS doesn't read them
+    cleanText = text.replace(/\[SCHEDULE:[^\]]*\]/g, "").trim();
+  }
+  return { cleanText, schedule };
+}
+
+/** Parse [SCHEDULE_REPEAT:daily|weekly:HH:mm:description] markers */
+export function parseScheduleRepeat(text: string): { cleanText: string; repeat: { freq: "daily" | "weekly"; time: string; prompt: string } | null } {
+  const pattern = /\[SCHEDULE_REPEAT:(daily|weekly):(\d{2}:\d{2}):([^\]]+)\]/g;
+  let repeat: { freq: "daily" | "weekly"; time: string; prompt: string } | null = null;
+  let cleanText = text;
+
+  const match = pattern.exec(text);
+  if (match) {
+    repeat = { freq: match[1] as "daily" | "weekly", time: match[2], prompt: match[3].trim() };
+    cleanText = text.slice(0, match.index) + text.slice(match.index + match[0].length);
+    cleanText = cleanText.trim();
+  } else {
+    // Fallback: strip any malformed [SCHEDULE_REPEAT:...] markers
+    cleanText = text.replace(/\[SCHEDULE_REPEAT:[^\]]*\]/g, "").trim();
+  }
+  return { cleanText, repeat };
+}
+
 /** Get or create an OpenCode session for a managed session */
 async function getOrCreateOpenCodeSession(managedSessionId: string): Promise<string> {
   const existing = openCodeSessions.get(managedSessionId);
@@ -120,6 +180,7 @@ export function resetSession(managedSessionId?: string) {
 /**
  * Streaming chat via OpenCode with enhanced logging (F10).
  * Supports multi-session routing (F9).
+ * Uses global EventHub for SSE event dispatch.
  *
  * @param message - User message text
  * @param managedSessionId - Which managed session to use
@@ -151,58 +212,37 @@ export async function chatStream(
       if (sessionStatus?.type === "busy") {
         log("LLM", `[${ts()}] Session busy, aborting...`);
         await client.session.abort({ path: { id: sessionId } } as any);
-        // Brief wait for abort to take effect
         await new Promise(r => setTimeout(r, 500));
       }
     } catch (statusErr: any) {
       log("LLM", `[${ts()}] [WARN] Status check failed: ${statusErr.message}`);
     }
 
-    // 1. Subscribe to SSE events BEFORE triggering prompt
-    const eventResult = await client.event.subscribe();
-    const eventStream = eventResult.stream ?? eventResult;
-
-    // 2. Fire promptAsync with agent: "jarvis"
-    client.session.promptAsync({
-      path: { id: sessionId },
-      body: {
-        parts: [{ type: "text", text: message }],
-        agent: "jarvis",
-      },
-    } as any).catch((err: any) => {
-      log("LLM", `[${ts()}] [ERROR] promptAsync: ${err.message}`);
-    });
-
-    // 3. Read events with detailed logging
+    // 1. Set up promise-based completion via EventHub
     let fullText = "";
     let reasoningText = "";
     let done = false;
     let toolStartTimes: Map<string, number> = new Map();
 
-    // Timeout safety (120s max)
-    const timeout = setTimeout(() => {
-      if (!done) {
-        done = true;
-        log("LLM", `[${ts()}] [TIMEOUT] 120s exceeded`);
-      }
-    }, 120000);
+    const completionPromise = new Promise<void>((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        if (!done) {
+          done = true;
+          log("LLM", `[${ts()}] [TIMEOUT] 120s exceeded`);
+          eventHub.off(sessionId);
+          resolve();
+        }
+      }, 120000);
 
-    try {
-      for await (const event of eventStream) {
-        if (done) break;
-        const evt = event as any;
+      // Register handler for this session's events
+      eventHub.on(sessionId, (evt: any) => {
+        if (done) return;
         const props = evt.properties ?? {};
-
-        // Only process events for our session
-        const evtSessionId = props.sessionID ?? props.part?.sessionID;
-        if (evtSessionId && evtSessionId !== sessionId) continue;
 
         // ── message.part.delta: incremental text/reasoning streaming ──
         if (evt.type === "message.part.delta") {
           const delta = props.delta ?? "";
           const partType = props.part?.type ?? props.type;
-          const evtPartSessionId = props.part?.sessionID ?? props.sessionID;
-          if (evtPartSessionId && evtPartSessionId !== sessionId) continue;
 
           if (partType === "reasoning") {
             reasoningText += delta;
@@ -210,28 +250,24 @@ export async function chatStream(
               log("LLM", `[${ts()}] [REASONING] (+${delta.length}) (${reasoningText.length} total) "${reasoningText.slice(-100)}"`);
             }
           } else {
-            // Default: text delta
-            // Skip user echo
-            if (delta.trim() === message.trim()) continue;
+            if (delta.trim() === message.trim()) return;
             fullText += delta;
             onDelta(delta);
             if (fullText.length <= 30 || fullText.length % 200 < (delta.length + 5)) {
               log("LLM", `[${ts()}] [TEXT] (+${delta.length}) (${fullText.length} total) "${fullText.slice(-80)}"`);
             }
           }
-          continue;
+          return;
         }
 
         // ── message.part.updated: structural part snapshots ──
         if (evt.type === "message.part.updated") {
           const part = props.part;
-          if (!part) continue;
+          if (!part) return;
 
-          // Text snapshot — sync fullText if delta missed something
           if (part.type === "text") {
             const newText = part.text ?? "";
-            // Skip user's own message echo
-            if (newText.trim() === message.trim()) continue;
+            if (newText.trim() === message.trim()) return;
             if (newText.length > fullText.length) {
               const missed = newText.slice(fullText.length);
               fullText = newText;
@@ -240,7 +276,6 @@ export async function chatStream(
             }
           }
 
-          // Reasoning snapshot
           if (part.type === "reasoning") {
             const text = part.text ?? "";
             if (text.length > reasoningText.length) {
@@ -249,7 +284,6 @@ export async function chatStream(
             }
           }
 
-          // Tool invocation logging (SDK: type "tool", state.status)
           if (part.type === "tool") {
             const toolName = part.tool ?? "unknown";
             const state = part.state;
@@ -279,7 +313,6 @@ export async function chatStream(
             }
           }
 
-          // Step start/finish for token tracking
           if (part.type === "step-start") {
             log("LLM", `[${ts()}] [STEP:START] part=${part.id}`);
           }
@@ -288,31 +321,47 @@ export async function chatStream(
             const cost = part.cost ?? 0;
             log("LLM", `[${ts()}] [STEP:FINISH] reason=${part.reason ?? "?"} cost=$${cost.toFixed(4)} tokens=[in:${tokens?.input ?? 0} out:${tokens?.output ?? 0} reasoning:${tokens?.reasoning ?? 0} cache_r:${tokens?.cache?.read ?? 0} cache_w:${tokens?.cache?.write ?? 0}]`);
           }
-          continue;
+          return;
         }
 
         if (evt.type === "session.idle") {
           log("LLM", `[${ts()}] [EVENT] session.idle`);
           done = true;
-          break;
+          clearTimeout(timeout);
+          eventHub.off(sessionId);
+          resolve();
+          return;
         }
 
         if (evt.type === "session.error") {
           const errMsg = props.error?.name ?? props.error?.message ?? "Unknown error";
           log("LLM", `[${ts()}] [EVENT] session.error: ${errMsg}`);
-          throw new Error(`OpenCode error: ${errMsg}`);
+          done = true;
+          clearTimeout(timeout);
+          eventHub.off(sessionId);
+          reject(new Error(`OpenCode error: ${errMsg}`));
+          return;
         }
 
-        // Log other event types (skip high-frequency ones)
         if (evt.type !== "message.updated") {
           log("LLM", `[${ts()}] [EVENT] ${evt.type}`);
         }
-      }
-    } catch (streamErr: any) {
-      if (!done) throw streamErr;
-    } finally {
-      clearTimeout(timeout);
-    }
+      });
+    });
+
+    // 2. Fire promptAsync with agent: "jarvis"
+    client.session.promptAsync({
+      path: { id: sessionId },
+      body: {
+        parts: [{ type: "text", text: message }],
+        agent: "jarvis",
+      },
+    } as any).catch((err: any) => {
+      log("LLM", `[${ts()}] [ERROR] promptAsync: ${err.message}`);
+    });
+
+    // 3. Wait for completion
+    await completionPromise;
 
     // Fallback: if events gave no text, fetch from messages API
     if (!fullText) {

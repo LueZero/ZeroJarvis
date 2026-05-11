@@ -40,7 +40,11 @@ export type ServerMessage =
   // Multi-Session (F9)
   | { type: "session_list"; sessions: SessionTab[] }
   | { type: "session_switch"; sessionId: string; state: SessionSnapshot }
-  | { type: "session_done"; sessionId: string; text: string };
+  | { type: "session_done"; sessionId: string; text: string }
+  // Background Tasks
+  | { type: "task_created"; taskId: string; description: string }
+  | { type: "task_done"; taskId: string; text: string }
+  | { type: "task_error"; taskId: string; error: string };
 
 // --- Polish Result ---
 export interface PolishResult {

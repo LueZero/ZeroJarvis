@@ -80,7 +80,7 @@ export async function transcribe(audio: Float32Array): Promise<string> {
   const wav = float32ToWav(clipped, SAMPLE_RATE);
 
   const formData = new FormData();
-  formData.append("file", new Blob([wav], { type: "audio/wav" }), "audio.wav");
+  formData.append("file", new Blob([wav as BlobPart], { type: "audio/wav" }), "audio.wav");
   formData.append("model", "whisper-large-v3");
   formData.append("language", "zh");
   formData.append("response_format", "json");

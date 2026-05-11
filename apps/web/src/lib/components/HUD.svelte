@@ -7,9 +7,9 @@
   import CameraPreview from "./CameraPreview.svelte";
   import MapOverlay from "./MapOverlay.svelte";
   import NotebookOverlay from "./NotebookOverlay.svelte";
-  import BookingPanel from "./BookingPanel.svelte";
   import SessionTabs from "./SessionTabs.svelte";
   import ScreenCaptureTool from "./ScreenCaptureTool.svelte";
+  import TaskPanel from "./TaskPanel.svelte";
   import {
     getState,
     setState,
@@ -27,9 +27,6 @@
     clearMapQuery,
     getFoodData,
     setFoodData,
-    getOpenTableData,
-    setOpenTableData,
-    clearOpenTableData,
     getNotebookContent,
     setNotebookContent,
     clearNotebookContent,
@@ -38,8 +35,20 @@
     switchSession,
     updateSessionDone,
     getActiveSnapshot,
+    addTaskNotification,
+    popTaskNotification,
+    getPendingNotifications,
+    incrementActiveTaskCount,
+    decrementActiveTaskCount,
+    getActiveTaskCount,
+    addTask,
+    completeTask,
+    failTask,
+    getTaskItems,
+    getTaskPanelOpen,
+    setTaskPanelOpen,
   } from "$lib/stores/agent.svelte";
-  import { initVAD, startVAD, stopVAD } from "$lib/audio/vad";
+  import { initVAD, startVAD, stopVAD, isVADActive } from "$lib/audio/vad";
   import { playAudio, stopAudio, isPlaying, ensureAudioContext } from "$lib/audio/player";
   import { connect, send, sendBinary } from "$lib/ws/client";
   import type { ServerMessage } from "@zerojarvis/shared";
@@ -95,6 +104,8 @@
       if (!vadReady) {
         await initVAD({
           onSpeechStart() {
+            // Guard: race condition — VAD event fired after stopVAD
+            if (!isVADActive()) return;
             // Guard: don't trigger if mic is paused or AI is busy
             if (listenPaused || !listening) {
               console.log("HUD | onSpeechStart blocked — mic paused");
@@ -113,7 +124,7 @@
               console.log("HUD | onSpeechEnd blocked — AI is", getState());
               return;
             }
-            // Allow final buffered speech to be sent even when pausing
+            // Allow submitUserSpeechOnPause: send buffered audio even when pausing
             console.log("HUD | speech ended, sending", audio.length, "samples to gateway");
             stopVAD();
             setState("thinking");
@@ -228,11 +239,31 @@
       case "session_done":
         updateSessionDone((msg as any).sessionId, (msg as any).text);
         break;
+      case "task_created":
+        incrementActiveTaskCount();
+        addTask((msg as any).taskId, (msg as any).description);
+        console.log(`📋 Task created: ${(msg as any).description}`);
+        break;
+      case "task_done": {
+        decrementActiveTaskCount();
+        const taskText = (msg as any).text as string;
+        const taskId = (msg as any).taskId as string;
+        completeTask(taskId, taskText);
+        console.log(`✅ Task done: ${taskText.slice(0, 80)}`);
+        // Server will send TTS audio right after this message.
+        // Pause VAD so mic doesn't interfere during task result playback.
+        if (vadReady) {
+          stopVAD();
+        }
+        break;
+      }
+      case "task_error":
+        decrementActiveTaskCount();
+        failTask((msg as any).taskId, (msg as any).error);
+        console.error(`❌ Task error: ${(msg as any).error}`);
+        break;
       case "food_results":
         setFoodData((msg as any).data);
-        break;
-      case "opentable_results":
-        setOpenTableData((msg as any).data);
         break;
       case "error":
         setError(msg.message);
@@ -344,6 +375,8 @@
         if (!vadReady) {
           await initVAD({
             onSpeechStart() {
+              // Guard: race condition — VAD event fired after stopVAD
+              if (!isVADActive()) return;
               // Guard: don't trigger if mic is paused or AI is busy
               if (listenPaused || !listening) {
                 console.log("HUD | onSpeechStart blocked — mic paused");
@@ -362,7 +395,7 @@
                 console.log("HUD | onSpeechEnd blocked — AI is", getState());
                 return;
               }
-              // Allow final buffered speech to be sent even when pausing
+              // Allow submitUserSpeechOnPause: send buffered audio even when pausing
               console.log("HUD | speech ended, sending", audio.length, "samples to gateway");
               stopVAD();
               setState("thinking");
@@ -499,6 +532,8 @@
           <span class="mic-dot" title="麥克風啟用中"></span>
         {/if}
       </div>
+      <!-- Task badge inline in header -->
+      <TaskPanel anchor="header" />
       <button class="menu-toggle" onclick={toggleMenu}>
         <span class="hamburger" class:open={menuOpen}>
           <span></span><span></span><span></span>
@@ -566,11 +601,6 @@
   <!-- NotebookLM overlay (triggered by [ACTION:NOTEBOOK:json]) -->
   {#if getNotebookContent()}
     <NotebookOverlay bind:this={notebookRef} content={getNotebookContent()!} onClose={() => { clearNotebookContent(); send({ type: "notebook_state", active: false } as any); }} />
-  {/if}
-
-  <!-- OpenTable booking panel -->
-  {#if getOpenTableData()}
-    <BookingPanel data={getOpenTableData()!} onClose={clearOpenTableData} />
   {/if}
 
   <!-- Subtitle overlay (bottom, does not push layout) -->

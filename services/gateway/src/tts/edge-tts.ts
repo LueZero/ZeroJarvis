@@ -3,7 +3,7 @@
  * Returns audio as ArrayBuffer
  */
 
-import { MsEdgeTTS } from "msedge-tts";
+import { MsEdgeTTS, OUTPUT_FORMAT } from "msedge-tts";
 
 const DEFAULT_VOICE = process.env.TTS_VOICE || "zh-TW-HsiaoChenNeural";
 
@@ -12,7 +12,7 @@ let ttsInstance: MsEdgeTTS | null = null;
 async function getTTS(): Promise<MsEdgeTTS> {
   if (!ttsInstance) {
     ttsInstance = new MsEdgeTTS();
-    await ttsInstance.setMetadata(DEFAULT_VOICE, "audio-24khz-48kbitrate-mono-mp3");
+    await ttsInstance.setMetadata(DEFAULT_VOICE, OUTPUT_FORMAT.AUDIO_24KHZ_48KBITRATE_MONO_MP3);
   }
   return ttsInstance;
 }
@@ -22,7 +22,7 @@ export async function synthesize(text: string, voice?: string): Promise<ArrayBuf
   let tts: MsEdgeTTS;
   if (voice && voice !== DEFAULT_VOICE) {
     tts = new MsEdgeTTS();
-    await tts.setMetadata(voice, "audio-24khz-48kbitrate-mono-mp3");
+    await tts.setMetadata(voice, OUTPUT_FORMAT.AUDIO_24KHZ_48KBITRATE_MONO_MP3);
   } else {
     tts = await getTTS();
   }

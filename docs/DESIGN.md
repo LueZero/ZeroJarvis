@@ -1,7 +1,7 @@
 # ZeroJarvis — Jarvis 語音個人助理設計文件
 
-> **版本**：0.5.0  
-> **日期**：2026-05-07  
+> **版本**：0.6.0  
+> **日期**：2026-05-11  
 > **代號**：ZeroJarvis (零代理 — 零打字互動)
 
 ---
@@ -215,6 +215,62 @@ JSON payload（如 NOTEBOOK）使用 brace-counting 解析，不受巢狀 `]` �
 | `media` | 檔案路徑 | 下載按鈕 + 類型標籤 |
 | `table` | CSV 字串 | HTML 表格渲染 |
 
+### F13：背景任務系統（Background Task System）
+```
+使用者: "一分鐘後提醒我開會"
+  → AI 查時間 → 計算排程 → 回覆 + [SCHEDULE:2026-05-11T11:45:00:提醒開會]
+  → Gateway 解析排程 → TaskQueue 建立任務 → Scheduler 每 5 秒檢查
+  → 時間到 → Worker 建立獨立 OpenCode session → 執行任務
+  → 完成 → TTS 語音播報結果
+
+使用者: "幫我比較三間日式餐廳"
+  → AI 判斷為長任務 → 回覆 + [ASYNC_TASK:搜尋並比較三間日式餐廳]
+  → Gateway 立即派發 Worker → 前台不卡住
+  → 完成後語音通知使用者
+```
+
+**三種任務標記：**
+| 標記 | 格式 | 觸發時機 |
+|------|------|----------|
+| `[ASYNC_TASK:描述]` | 即時背景任務 | 耗時操作（搜尋比較、訂位、多步驟工具鏈） |
+| `[SCHEDULE:ISO時間:描述]` | 定時排程 | 「X 分鐘後」「明天早上」等時間指令 |
+| `[SCHEDULE_REPEAT:daily\|weekly:HH:mm:描述]` | 重複排程 | 「每天」「每週」等週期指令 |
+
+**後端架構（4 個模組）：**
+
+| 模組 | 檔案 | 職責 |
+|------|------|------|
+| **TaskQueue** | `task/queue.ts` | 記憶體任務儲存、生命週期管理、完成通知 |
+| **Scheduler** | `task/scheduler.ts` | 每 5 秒檢查到期任務、持久化到 `config/schedules.json` |
+| **Worker** | `task/worker.ts` | 建立 OpenCode worker session 執行任務（最多 3 並行） |
+| **EventHub** | `task/event-hub.ts` | 單一 SSE 連線集中派發所有 session 事件 |
+
+**任務生命週期：**
+```
+pending → running → done / error
+              ↑
+      Worker 建立 session
+      → promptAsync(task-worker agent)
+      → 監聽 SSE events
+      → 收集 assistant 回覆
+      → session.idle → 完成
+```
+
+**前端 Task Panel（科幻風格下拉面板）：**
+- Header 右側 badge 按鈕顯示執行中任務數
+- 展開面板列出所有任務：spinner（執行中）、✓（完成）、✕（失敗）
+- 即時經過時間計時器（每秒更新）
+- 任務完成時自動暫停 VAD → 播報 TTS 結果 → 恢復聆聽
+- RWD：≥768px 400px 寬、≤600px 全寬
+
+**配置值：**
+| 參數 | 值 | 說明 |
+|------|------|------|
+| `CHECK_INTERVAL_MS` | 5,000ms | 排程檢查頻率 |
+| `MAX_CONCURRENT_WORKERS` | 3 | 最大並行 worker 數 |
+| `WORKER_TIMEOUT_MS` | 180,000ms | 單一任務超時（3 分鐘） |
+| 持久化檔案 | `config/schedules.json` | 重啟恢復排程 |
+
 ### F10：Gateway 串流日誌（Streaming Logs）
 ```
 [14:32:05.123] [EVENT] message.part.updated — "好的，讓我幫你查一下..."
@@ -237,8 +293,8 @@ JSON payload（如 NOTEBOOK）使用 brace-counting 解析，不受巢狀 `]` �
 ┌───────────────────────────────────────────────────────────┐
 │            前端 UI (SvelteKit + Tauri)  :3000              │
 │  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────────┐ │
-│  │ Mic/VAD  │ │ Camera   │ │ HUD/Viz  │ │  Subtitle    │ │
-│  │ (Silero) │ │(MediaAPI)│ │ (Canvas) │ │  (打字機)    │ │
+│  │ Mic/VAD  │ │ Camera   │ │ HUD/Viz  │ │  TaskPanel   │ │
+│  │ (Silero) │ │(MediaAPI)│ │ (Canvas) │ │  (即時狀態)  │ │
 │  └────┬─────┘ └────┬─────┘ └──────────┘ └──────────────┘ │
 └───────┼─────────────┼─────────────────────────────────────┘
         │ ws:binary   │ ws:json(image)
@@ -248,6 +304,11 @@ JSON payload（如 NOTEBOOK）使用 brace-counting 解析，不受巢狀 `]` �
 │  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────────┐ │
 │  │   STT    │ │   TTS    │ │  Vision  │ │  Session Mgr │ │
 │  │(Groq API)│ │(edge-tts)│ │(OpenCode)│ │ (OpenCode)   │ │
+│  └──────────┘ └──────────┘ └──────────┘ └──────────────┘ │
+│  ┌──────────────────────────────────────────────────────┐ │
+│  │  Background Task System                              │ │
+│  │  EventHub (SSE) │ TaskQueue │ Scheduler │ Worker     │ │
+│  └──────────────────────────────────────────────────────┘ │
 │  └────┬─────┘ └────┬─────┘ └────┬─────┘ └──────┬───────┘ │
 └───────┼────────────┼────────────┼───────────────┼─────────┘
         │            │            │               │
@@ -392,9 +453,40 @@ STT 結果 → 關鍵字比對
   └─ no match → 正常送到 active session 的 chatStream
 ```
 
----
+### 5.5 背景任務流程（F13）
 
-## 6. UI 設計
+```
+[使用者語音] "30 秒後告訴我現在幾點"
+     │
+     ▼ (STT → LLM → bash Get-Date → 計算時間)
+[LLM 回覆] "好的，30 秒後告訴您。[SCHEDULE:2026-05-11T11:42:52:告訴使用者現在幾點]"
+     │
+     ▼ (Gateway: parseSchedule())
+[TaskQueue: createTask(scheduled)] → [Scheduler: 每 5 秒檢查]
+     │                                     │
+     ▼ (前端)                               ▼ (時間到)
+[task_created → TaskPanel 顯示]      [Worker: execute(task)]
+                                          │
+                                          ▼
+                                    [OpenCode: session.create()]
+                                    [promptAsync(task-worker agent)]
+                                          │
+                                          ▼ (EventHub SSE 監聽)
+                                    [收集 assistant 回覆文字]
+                                    [session.idle → finishWorker()]
+                                          │
+                                          ▼
+                                    [TaskQueue: complete(taskId, result)]
+                                    [onDone → Gateway 通知前端]
+                                          │
+                                    ┌─────┴─────┐
+                                    ▼           ▼
+                              [task_done]   [TTS 語音播報]
+                              [TaskPanel    [前端暫停 VAD
+                               更新狀態]     播完恢復聆聽]
+```
+
+---
 
 ### 6.1 配色方案（深色科技風 — 青藍 + 紫色）
 
@@ -496,6 +588,10 @@ type ServerMessage =
   | { type: "session_list"; sessions: SessionTab[] }  // 所有 session 狀態
   | { type: "session_switch"; sessionId: string; state: SessionSnapshot } // 切換 session
   | { type: "session_done"; sessionId: string; text: string }  // 背景 session 完成
+  // 背景任務系統 (F13)
+  | { type: "task_created"; taskId: string; description: string }  // 任務已建立
+  | { type: "task_done"; taskId: string; text: string }            // 任務完成（附結果）
+  | { type: "task_error"; taskId: string; error: string }          // 任務失敗
 
 // Session 型別 (F9)
 interface SessionTab {
@@ -560,6 +656,7 @@ zerojarvis/
 │   └── gateway/                     # Voice Gateway (:3100)
 │       └── src/
 │           ├── index.ts             # Hono + WebSocket Server
+│           ├── logger.ts            # 結構化日誌
 │           ├── llm/
 │           │   ├── client.ts        # OpenCode SDK 客戶端
 │           │   └── opencode.ts      # chatStream (event SSE)
@@ -571,12 +668,18 @@ zerojarvis/
 │           │   └── processor.ts     # 圖片分析
 │           ├── session/
 │           │   └── manager.ts       # Session 管理
+│           ├── task/                 # 背景任務系統 (F13)
+│           │   ├── event-hub.ts     # 全域 SSE 事件派發
+│           │   ├── queue.ts         # 任務佇列 + 生命週期
+│           │   ├── scheduler.ts     # 定時排程（5 秒檢查）
+│           │   └── worker.ts        # OpenCode worker session 執行
 │           ├── ws/
 │           │   └── handler.ts       # WebSocket 訊息路由
 │           └── food/
 │               └── mcp-server.cjs   # OpenTable MCP Server (CDP)
 ├── config/
-│   └── booking.json                 # 訂位人資訊（姓名/電話/email）
+│   ├── booking.json                 # 訂位人資訊（姓名/電話/email）
+│   └── schedules.json               # 排程持久化（自動產生）
 ├── files/                           # 產生的檔案（git-ignored 內容）
 │   ├── captures/                    # 攝像頭截圖 (.jpg)
 │   └── notebooklm/                  # NotebookLM CLI 下載
@@ -715,6 +818,7 @@ npx skills remove <name>
 - [x] NotebookLM 整合（notebooklm-py CLI，問答 + 來源管理 + 內容產生 + 前端 Overlay 顯示）
 - [x] OpenTable 自動訂位（MCP Server + Playwright CDP + auth iframe 驗證流程）
 - [x] 社群技能整合（skills.sh 生態系 — find-skills / skill-creator / mcp-builder / claude-api 等 9 個技能）
+- [x] 背景任務系統（ASYNC_TASK 即時背景 + SCHEDULE 定時排程 + SCHEDULE_REPEAT 重複排程 + Task Panel UI）
 - [ ] NotebookLM 線上播放（音視訊 serve + `<audio>`/`<video>` 播放器）
 - [ ] Session 持久化（SQLite，重啟保留歷史）
 - [ ] 語音快捷指令（自訂短語對應動作）

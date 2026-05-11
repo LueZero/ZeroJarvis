@@ -38,6 +38,27 @@ let messages = $state<ChatMessage[]>([]);
 // --- Global State (shared across all sessions) ---
 let isConnected = $state(false);
 
+// --- Background Task Notifications ---
+interface TaskNotification {
+  taskId: string;
+  text: string;
+  receivedAt: number;
+}
+
+export interface TaskItem {
+  id: string;
+  description: string;
+  status: "running" | "done" | "error";
+  createdAt: number;
+  completedAt?: number;
+  resultText?: string;
+}
+
+let pendingTaskNotifications = $state<TaskNotification[]>([]);
+let activeTaskCount = $state(0);
+let taskItems = $state<TaskItem[]>([]);
+let taskPanelOpen = $state(false);
+
 // --- Multi-Session State ---
 let sessions = $state<SessionTab[]>([]);
 let activeSessionId = $state<string>("__default__");
@@ -296,4 +317,63 @@ export function getActiveSnapshot(): SessionSnapshot {
     notebookContent,
     error,
   };
+}
+
+// --- Background Task Functions ---
+export function addTaskNotification(taskId: string, text: string) {
+  pendingTaskNotifications = [...pendingTaskNotifications, { taskId, text, receivedAt: Date.now() }];
+}
+
+export function popTaskNotification(): TaskNotification | null {
+  if (pendingTaskNotifications.length === 0) return null;
+  const [first, ...rest] = pendingTaskNotifications;
+  pendingTaskNotifications = rest;
+  return first;
+}
+
+export function getPendingNotifications(): TaskNotification[] {
+  return pendingTaskNotifications;
+}
+
+export function getActiveTaskCount(): number {
+  return activeTaskCount;
+}
+
+export function incrementActiveTaskCount() {
+  activeTaskCount++;
+}
+
+export function decrementActiveTaskCount() {
+  if (activeTaskCount > 0) activeTaskCount--;
+}
+
+// --- Task Panel Functions ---
+export function addTask(id: string, description: string) {
+  taskItems = [...taskItems, { id, description, status: "running", createdAt: Date.now() }];
+  taskPanelOpen = true;
+}
+
+export function completeTask(id: string, resultText?: string) {
+  taskItems = taskItems.map(t => t.id === id ? { ...t, status: "done" as const, completedAt: Date.now(), resultText } : t);
+}
+
+export function failTask(id: string, errorText?: string) {
+  taskItems = taskItems.map(t => t.id === id ? { ...t, status: "error" as const, completedAt: Date.now(), resultText: errorText } : t);
+}
+
+export function getTaskItems(): TaskItem[] {
+  return taskItems;
+}
+
+export function getTaskPanelOpen(): boolean {
+  return taskPanelOpen;
+}
+
+export function setTaskPanelOpen(open: boolean) {
+  taskPanelOpen = open;
+}
+
+export function clearCompletedTasks() {
+  taskItems = taskItems.filter(t => t.status === "running");
+  if (taskItems.length === 0) taskPanelOpen = false;
 }

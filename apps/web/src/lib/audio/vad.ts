@@ -18,6 +18,7 @@ export interface VADCallbacks {
 
 let vadInstance: any = null;
 let speechStartTime = 0;
+let vadActive = false;
 
 export async function initVAD(callbacks: VADCallbacks) {
   // Dynamic import to avoid SSR issues
@@ -70,15 +71,22 @@ export async function initVAD(callbacks: VADCallbacks) {
 
 export function startVAD() {
   console.log("VAD | ▶️ start() called, instance:", !!vadInstance);
+  vadActive = true;
   vadInstance?.start();
 }
 
 export function stopVAD() {
   console.log("VAD | ⏸️ pause() called");
+  vadActive = false;
   vadInstance?.pause();
 }
 
+export function isVADActive(): boolean {
+  return vadActive;
+}
+
 export function destroyVAD() {
+  vadActive = false;
   vadInstance?.destroy();
   vadInstance = null;
 }

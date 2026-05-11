@@ -36,6 +36,8 @@
 | 「筆記本裡有什麼關於 RAG 的內容」 | 📓 查詢 Google NotebookLM → 帶引用回覆 |
 | 「新對話」「上一個」「下一個」 | 💬 無上限平行多會話管理 |
 | 「安靜一下」 | 🔇 AI 自動暫停聆聽 |
+| 「30 秒後提醒我開會」 | ⏰ 定時排程 → 時間到語音通知 |
+| 「幫我比較三間日式餐廳」 | 🔄 背景任務執行 → 完成後語音報告 |
 
 > **設計哲學**：所有互動都從語音開始，AI 透過 `[ACTION]` 標記主動控制前端 UI（攝像頭、地圖、截圖工具等），而非被動等待使用者操作。
 
@@ -46,6 +48,7 @@
 - **🎯 ACTION 控制系統** — AI 在回覆中嵌入控制標記，主動驅動前端 UI
 - **🧩 Skill 驅動行為** — 所有 AI 行為由 SKILL.md 定義，支援 [skills.sh](https://skills.sh/) 社群技能
 - **💬 多會話管理** — 無上限平行對話，語音切換，背景處理完成通知
+- **⏰ 背景任務** — AI 自動判斷耗時操作派到背景，定時排程、重複排程，完成後語音通知
 - **📷 視覺分析** — 攝像頭拍照 + 螢幕截圖，送 Vision Agent 分析
 - **🗺️ 地圖導航** — AI 推薦地點後自動彈出 Google Maps
 - **🍽️ 餐廳訂位** — OpenTable 全自動化（MCP Server + Playwright CDP）
@@ -66,7 +69,7 @@
                        │ WS   │ WS
 ┌──────────────────────▼──────▼───────────────────────────────┐
 │                 Voice Gateway (Bun + Hono)                  │
-│         STT (Groq) │ TTS (edge-tts) │ Session Manager       │
+│   Gateway:  STT (Groq) │ TTS (edge-tts) │ Session │ Task System  │
 └──────────────────────────┬──────────────────────────────────┘
                            │ HTTP/SSE
 ┌──────────────────────────▼──────────────────────────────────┐
@@ -166,7 +169,9 @@ ZeroJarvis/
 │   └── desktop/               # Tauri 桌面應用 (Rust + Web)
 ├── services/
 │   └── gateway/               # Bun WebSocket 語音閘道           :3100
-│       └── src/food/          # OpenTable MCP Server (CDP)
+│       └── src/
+│           ├── food/          # OpenTable MCP Server (CDP)
+│           └── task/          # 背景任務系統 (Queue + Scheduler + Worker + EventHub)
 ├── packages/
 │   └── shared/                # 共用型別與常數
 ├── .opencode/
@@ -221,6 +226,16 @@ AI 在回覆中嵌入 ACTION 標記來主動控制前端，標記會被自動移
 | `[ACTION:NEW_SESSION]` | 建立新對話 |
 | `[ACTION:SESSION_PREV]` / `NEXT` | 切換對話 |
 | `[ACTION:LISTEN_PAUSE]` / `RESUME` | 暫停 / 恢復聆聽 |
+
+### 背景任務標記
+
+AI 回覆中嵌入任務標記，由 Gateway 解析後派發執行：
+
+| 標記 | 效果 |
+|------|------|
+| `[ASYNC_TASK:描述]` | 立即派發背景 worker 執行 |
+| `[SCHEDULE:ISO時間:描述]` | 指定時間觸發執行 |
+| `[SCHEDULE_REPEAT:daily\|weekly:HH:mm:描述]` | 重複排程 |
 
 <details>
 <summary><strong>如何擴充 ACTION</strong></summary>
