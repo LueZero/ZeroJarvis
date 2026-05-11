@@ -95,7 +95,11 @@
       if (!vadReady) {
         await initVAD({
           onSpeechStart() {
-            // Guard: don't override thinking/speaking state
+            // Guard: don't trigger if mic is paused or AI is busy
+            if (listenPaused || !listening) {
+              console.log("HUD | onSpeechStart blocked — mic paused");
+              return;
+            }
             if (isBusy()) {
               console.log("HUD | onSpeechStart blocked — AI is", getState());
               return;
@@ -109,6 +113,7 @@
               console.log("HUD | onSpeechEnd blocked — AI is", getState());
               return;
             }
+            // Allow final buffered speech to be sent even when pausing
             console.log("HUD | speech ended, sending", audio.length, "samples to gateway");
             stopVAD();
             setState("thinking");
@@ -339,7 +344,11 @@
         if (!vadReady) {
           await initVAD({
             onSpeechStart() {
-              // Guard: don't override thinking/speaking state
+              // Guard: don't trigger if mic is paused or AI is busy
+              if (listenPaused || !listening) {
+                console.log("HUD | onSpeechStart blocked — mic paused");
+                return;
+              }
               if (isBusy()) {
                 console.log("HUD | onSpeechStart blocked — AI is", getState());
                 return;
@@ -353,6 +362,7 @@
                 console.log("HUD | onSpeechEnd blocked — AI is", getState());
                 return;
               }
+              // Allow final buffered speech to be sent even when pausing
               console.log("HUD | speech ended, sending", audio.length, "samples to gateway");
               stopVAD();
               setState("thinking");
@@ -380,9 +390,10 @@
       }
     } else {
       // === Turn OFF ===
-      stopVAD();
+      // Set flags BEFORE stopping VAD so submitUserSpeechOnPause callback sees paused state
       listening = false;
       listenPaused = true;
+      stopVAD();
       // Only reset to idle if currently listening; don't interrupt speaking/thinking state
       if (getState() === "listening") {
         setState("idle");
