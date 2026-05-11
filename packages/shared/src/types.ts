@@ -21,7 +21,9 @@ export type ClientMessage =
   | { type: "switch_session"; sessionId: string }
   | { type: "config"; settings: Partial<UserConfig> }
   | { type: "notebook_state"; active: boolean; contentType?: NotebookContentType }
-  | { type: "task_delete"; taskId: string };
+  | { type: "task_delete"; taskId: string }
+  // Compaction (F17)
+  | { type: "summarize_session" };
 
 // --- WebSocket Messages: Server → Client ---
 export type ServerMessage =
@@ -46,7 +48,10 @@ export type ServerMessage =
   | { type: "task_created"; taskId: string; description: string }
   | { type: "task_done"; taskId: string; text: string }
   | { type: "task_error"; taskId: string; error: string }
-  | { type: "task_deleted"; taskId: string };
+  | { type: "task_deleted"; taskId: string }
+  // Token & Compaction (F17)
+  | { type: "token_update"; usage: TokenUsage }
+  | { type: "session_summary"; sessionId: string; success: boolean };
 
 // --- Polish Result ---
 export interface PolishResult {
@@ -105,6 +110,7 @@ export interface SessionTab {
   title: string;
   status: SessionStatus;
   active: boolean;
+  hasSummary?: boolean;
 }
 
 export interface SessionSnapshot {
@@ -180,6 +186,19 @@ export interface OpenTableResult {
   partySize: number;
   error?: string;
   searchedAt: string;
+}
+
+// --- Token Usage (F17) ---
+export interface TokenUsage {
+  input: number;
+  output: number;
+  reasoning: number;
+  cacheRead: number;
+  cacheWrite: number;
+  cost: number;
+  total: number;
+  contextLimit: number;
+  usagePercent: number;
 }
 
 // --- NotebookLM Content Display ---

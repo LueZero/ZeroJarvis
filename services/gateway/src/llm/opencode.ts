@@ -17,6 +17,7 @@
  */
 
 import { getClient } from "./client.js";
+import { getContextLimit } from "./client.js";
 import { log } from "../logger.js";
 import * as sessionManager from "../session/manager.js";
 import * as eventHub from "../task/event-hub.js";
@@ -343,6 +344,12 @@ export async function chatStream(
             const tokens = part.tokens;
             const cost = part.cost ?? 0;
             log("LLM", `[${ts()}] [STEP:FINISH] reason=${part.reason ?? "?"} cost=$${cost.toFixed(4)} tokens=[in:${tokens?.input ?? 0} out:${tokens?.output ?? 0} reasoning:${tokens?.reasoning ?? 0} cache_r:${tokens?.cache?.read ?? 0} cache_w:${tokens?.cache?.write ?? 0}]`);
+
+            // F17: Accumulate tokens for this session
+            if (tokens) {
+              const usage = accumulateTokens(sessionId, tokens, cost);
+              log("LLM", `[${ts()}] [TOKEN] session ${sessionId.slice(0, 8)}: ${usage.total.toLocaleString()} tokens (${usage.usagePercent}%)`);
+            }
           }
           return;
         }
@@ -434,4 +441,233 @@ export async function chat(message: string, managedSessionId: string): Promise<s
       (err) => reject(err),
     );
   });
+}
+
+// ── F16: Structured Output ──
+
+/** JSON Schema for structured worker/vision responses */
+const STRUCTURED_OUTPUT_SCHEMA = {
+  type: "object" as const,
+  properties: {
+    text: { type: "string", description: "The response text (without any action markers)" },
+    actions: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          action: { type: "string", description: "Action name e.g. CAMERA_ON, MAP, NOTEBOOK" },
+          payload: { type: "string", description: "Optional action payload" },
+        },
+        required: ["action"],
+      },
+      description: "UI actions to trigger",
+    },
+    asyncTask: { type: "string", description: "Background task description, if any" },
+    schedule: {
+      type: "object",
+      properties: {
+        time: { type: "string", description: "ISO 8601 datetime" },
+        prompt: { type: "string", description: "Task description" },
+      },
+      required: ["time", "prompt"],
+      description: "One-time scheduled task",
+    },
+    scheduleRepeat: {
+      type: "object",
+      properties: {
+        freq: { type: "string", description: "Frequency: daily, weekly, Ns, Nm, Nh" },
+        time: { type: "string", description: "HH:mm time" },
+        prompt: { type: "string", description: "Task description" },
+      },
+      required: ["freq", "time", "prompt"],
+      description: "Recurring scheduled task",
+    },
+  },
+  required: ["text"],
+};
+
+export interface StructuredResponse {
+  text: string;
+  actions?: { action: string; payload?: string }[];
+  asyncTask?: string;
+  schedule?: { time: string; prompt: string };
+  scheduleRepeat?: { freq: string; time: string; prompt: string };
+}
+
+/**
+ * F16: Structured chat using session.prompt() + format (synchronous).
+ * Used by worker and vision — not for main conversation (which needs streaming + TTS).
+ * Falls back to regex parsing on structured output failure.
+ */
+export async function chatStructured(
+  sessionId: string,
+  message: string,
+  agent?: string,
+): Promise<StructuredResponse> {
+  const client = await getClient();
+
+  try {
+    const result = await client.session.prompt({
+      path: { id: sessionId },
+      body: {
+        parts: [{ type: "text", text: message }],
+        ...(agent ? { agent } : {}),
+        format: {
+          type: "json_schema",
+          schema: STRUCTURED_OUTPUT_SCHEMA,
+        },
+      },
+    } as any);
+
+    const data = (result as any).data ?? result;
+
+    // Check for StructuredOutputError
+    if (data?.info?.error?.name === "StructuredOutputError") {
+      log("LLM", `[STRUCTURED] StructuredOutputError, falling back to regex`);
+      return fallbackRegexParse(data, sessionId);
+    }
+
+    // Attempt to extract structured output
+    const structured = data?.info?.structured_output ?? data?.info?.structured;
+    if (structured && typeof structured === "object" && structured.text) {
+      log("LLM", `[STRUCTURED] OK — text=${(structured.text as string).length} chars, actions=${structured.actions?.length ?? 0}`);
+      return structured as StructuredResponse;
+    }
+
+    // If no structured output, try extracting text and parsing with regex
+    log("LLM", `[STRUCTURED] No structured output in response, falling back to regex`);
+    return fallbackRegexParse(data, sessionId);
+
+  } catch (err: any) {
+    log("LLM", `[STRUCTURED] Error: ${err.message}, falling back to regex`);
+    // Try a plain prompt as fallback
+    try {
+      const fallbackResult = await client.session.prompt({
+        path: { id: sessionId },
+        body: {
+          parts: [{ type: "text", text: message }],
+          ...(agent ? { agent } : {}),
+        },
+      } as any);
+      return fallbackRegexParse((fallbackResult as any).data ?? fallbackResult, sessionId);
+    } catch (fallbackErr: any) {
+      return { text: `Error: ${fallbackErr.message}` };
+    }
+  }
+}
+
+/** Extract text from a prompt response and parse with regex fallback */
+function fallbackRegexParse(data: any, sessionId: string): StructuredResponse {
+  // Extract text from parts
+  let rawText = "";
+  const parts = data?.parts ?? [];
+  for (const part of parts) {
+    if (part?.type === "text" && part?.text) {
+      rawText += part.text;
+    }
+  }
+
+  if (!rawText) {
+    rawText = data?.info?.text ?? "";
+  }
+
+  // Parse with existing regex functions
+  const { cleanText: t1, actions } = parseActions(rawText);
+  const { cleanText: t2, taskDescription } = parseAsyncTask(t1);
+  const { cleanText: t3, schedule } = parseSchedule(t2);
+  const { cleanText: finalText, repeat } = parseScheduleRepeat(t3);
+
+  const result: StructuredResponse = { text: finalText, actions };
+  if (taskDescription) result.asyncTask = taskDescription;
+  if (schedule) result.schedule = schedule;
+  if (repeat) result.scheduleRepeat = repeat;
+
+  return result;
+}
+
+// ── F17: Session Summarize ──
+
+/** Token accumulator per OpenCode session */
+const sessionTokens: Map<string, { input: number; output: number; reasoning: number; cacheRead: number; cacheWrite: number; cost: number }> = new Map();
+
+/**
+ * Accumulate token usage from a step-finish event.
+ * Called from chatStream's event handler.
+ * Returns the updated total token count for the session.
+ */
+export function accumulateTokens(
+  openCodeSessionId: string,
+  tokens: { input?: number; output?: number; reasoning?: number; cache?: { read?: number; write?: number } },
+  cost: number,
+): { total: number; usagePercent: number } {
+  const prev = sessionTokens.get(openCodeSessionId) ?? { input: 0, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0, cost: 0 };
+  prev.input += tokens.input ?? 0;
+  prev.output += tokens.output ?? 0;
+  prev.reasoning += tokens.reasoning ?? 0;
+  prev.cacheRead += tokens.cache?.read ?? 0;
+  prev.cacheWrite += tokens.cache?.write ?? 0;
+  prev.cost += cost;
+  sessionTokens.set(openCodeSessionId, prev);
+
+  const total = prev.input + prev.output + prev.reasoning + prev.cacheRead + prev.cacheWrite;
+  const contextLimit = getContextLimit();
+  const usagePercent = contextLimit > 0 ? Math.round((total / contextLimit) * 100) : 0;
+
+  return { total, usagePercent };
+}
+
+/** Get token usage for an OpenCode session */
+export function getSessionTokens(openCodeSessionId: string) {
+  const t = sessionTokens.get(openCodeSessionId);
+  if (!t) return null;
+  const total = t.input + t.output + t.reasoning + t.cacheRead + t.cacheWrite;
+  const contextLimit = getContextLimit();
+  return {
+    ...t,
+    total,
+    contextLimit,
+    usagePercent: contextLimit > 0 ? Math.round((total / contextLimit) * 100) : 0,
+  };
+}
+
+/** Reset token tracking for a session (after compaction) */
+export function resetSessionTokens(openCodeSessionId: string): void {
+  sessionTokens.delete(openCodeSessionId);
+}
+
+/** Compaction threshold (70% of context window) */
+const COMPACTION_THRESHOLD = 0.7;
+
+/**
+ * F17: Summarize (compact) a session to free up context window.
+ * Calls session.summarize() on the OpenCode server.
+ */
+export async function summarizeSession(openCodeSessionId: string): Promise<boolean> {
+  try {
+    const client = await getClient();
+    log("LLM", `[SUMMARIZE] Triggering compaction for session ${openCodeSessionId.slice(0, 8)}`);
+
+    await client.session.summarize({
+      path: { id: openCodeSessionId },
+      body: {},
+    } as any);
+
+    // Reset token tracking after compaction
+    resetSessionTokens(openCodeSessionId);
+    log("LLM", `[SUMMARIZE] Compaction completed, token counters reset`);
+    return true;
+  } catch (err: any) {
+    log("LLM", `[SUMMARIZE] Failed: ${err.message}`);
+    return false;
+  }
+}
+
+/**
+ * Check if a session should be auto-compacted based on token usage.
+ * Returns true if compaction was triggered.
+ */
+export function shouldAutoCompact(openCodeSessionId: string): boolean {
+  const usage = getSessionTokens(openCodeSessionId);
+  if (!usage) return false;
+  return usage.usagePercent >= COMPACTION_THRESHOLD * 100;
 }

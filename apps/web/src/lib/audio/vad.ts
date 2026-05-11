@@ -19,6 +19,8 @@ export interface VADCallbacks {
 let vadInstance: any = null;
 let speechStartTime = 0;
 let vadActive = false;
+/** Tracks whether a real speech session is in progress (set by onSpeechStart, cleared by onSpeechEnd) */
+let speechInProgress = false;
 
 export async function initVAD(callbacks: VADCallbacks) {
   // Dynamic import to avoid SSR issues
@@ -42,13 +44,19 @@ export async function initVAD(callbacks: VADCallbacks) {
     },
 
     onSpeechStart: () => {
+      // Guard: block stale events from AudioWorklet after pause()
+      if (!vadActive) {
+        console.log("VAD | 🎙️ speech started (ignored — vadActive=false)");
+        return;
+      }
       console.log("VAD | 🎙️ speech started");
+      speechInProgress = true;
       speechStartTime = Date.now();
       callbacks.onSpeechStart();
 
       // Auto-switch to long mode after threshold
       setTimeout(() => {
-        if (vadInstance && Date.now() - speechStartTime >= VAD_LONG_SPEECH_THRESHOLD_MS) {
+        if (vadInstance && vadActive && Date.now() - speechStartTime >= VAD_LONG_SPEECH_THRESHOLD_MS) {
           // Extend silence tolerance for long speech
           vadInstance.setOptions({ redemptionMs: VAD_REDEMPTION_MS_LONG });
         }
@@ -56,6 +64,13 @@ export async function initVAD(callbacks: VADCallbacks) {
     },
 
     onSpeechEnd: (audio: Float32Array) => {
+      // Guard: only allow if a real speech session was in progress
+      // (filters stale AudioWorklet events after pause, but allows submitUserSpeechOnPause)
+      if (!speechInProgress) {
+        console.log("VAD | 🔇 speech ended (ignored — no active speech), audio length:", audio.length);
+        return;
+      }
+      speechInProgress = false;
       console.log("VAD | 🔇 speech ended, audio length:", audio.length);
       // Reset to default redemption
       if (vadInstance) {
@@ -76,9 +91,13 @@ export function startVAD() {
 }
 
 export function stopVAD() {
-  console.log("VAD | ⏸️ pause() called");
+  console.log("VAD | ⏸️ pause() called, speechInProgress:", speechInProgress);
   vadActive = false;
+  // pause() may synchronously trigger onSpeechEnd via submitUserSpeechOnPause
+  // speechInProgress flag ensures only legitimate buffered speech goes through
   vadInstance?.pause();
+  // After pause returns, clear speechInProgress to block any further stale events
+  speechInProgress = false;
 }
 
 export function isVADActive(): boolean {

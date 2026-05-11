@@ -1,12 +1,13 @@
 import type { ServerWebSocket } from "bun";
 import type { ClientMessage, ServerMessage, AgentState, NotebookContentType } from "@zerojarvis/shared";
 import { transcribe } from "../stt/whisper.js";
-import { chatStream, resetSession, parseActions, parseAsyncTask, parseSchedule, parseScheduleRepeat, parseMemory } from "../llm/opencode.js";
+import { chatStream, resetSession, parseActions, parseAsyncTask, parseSchedule, parseScheduleRepeat, parseMemory, getSessionTokens, summarizeSession, shouldAutoCompact } from "../llm/opencode.js";
 import { processVision } from "../vision/processor.js";
 import { synthesize } from "../tts/edge-tts.js";
 import { polish } from "../polish/polisher.js";
 import { log, logWarn, logError } from "../logger.js";
 import * as sessionManager from "../session/manager.js";
+import { checkHealth, fetchContextLimit } from "../llm/client.js";
 import * as taskQueue from "../task/queue.js";
 import * as taskWorker from "../task/worker.js";
 import * as scheduler from "../task/scheduler.js";
@@ -114,11 +115,41 @@ function sendSessionList(ws: ServerWebSocket<WSData>) {
   send(ws, { type: "session_list", sessions: sessionManager.getAllTabs() } as any);
 }
 
+/** F17: Send token usage update to client for the active session */
+function sendTokenUpdate(ws: ServerWebSocket<WSData>) {
+  const active = sessionManager.getActive();
+  if (!active?.openCodeSessionId) {
+    log("LLM", `[TOKEN_UPDATE] Skip: no openCodeSessionId (active=${active?.id?.slice(0, 8) ?? "null"})`);
+    return;
+  }
+  const usage = getSessionTokens(active.openCodeSessionId);
+  if (!usage) {
+    log("LLM", `[TOKEN_UPDATE] Skip: no token data for ${active.openCodeSessionId.slice(0, 8)}`);
+    return;
+  }
+  log("LLM", `[TOKEN_UPDATE] Sending: ${usage.total.toLocaleString()} tokens (${usage.usagePercent}%) cost=$${usage.cost.toFixed(4)}`);
+  sessionManager.setTokenUsage(active.id, usage);
+  send(ws, { type: "token_update", usage } as any);
+
+  // Auto-compaction check
+  if (shouldAutoCompact(active.openCodeSessionId)) {
+    log("LLM", `[TOKEN] Session ${active.id.slice(0, 8)} at ${usage.usagePercent}% — auto-compaction recommended`);
+  }
+}
+
 /** Active WebSocket connection (single-client model) */
 let activeWs: ServerWebSocket<WSData> | null = null;
 
 /** Start background systems (EventHub, Scheduler, Task notifications) */
 export async function startBackgroundSystems(): Promise<void> {
+  // F14: Health check — verify OpenCode server is reachable
+  const health = await checkHealth();
+
+  // F17: If healthy, fetch context limit for token tracking
+  if (health.healthy) {
+    await fetchContextLimit();
+  }
+
   // Initialize memory system
   memory.ensureDir();
   log("INIT", "Memory system initialized");
@@ -349,6 +380,7 @@ export function handleWebSocket() {
                   send(ws, { type: "task_created", taskId: repTask.id, description: `重複排程：${repeat.prompt}` } as any);
                 }
 
+                sendTokenUpdate(ws);
                 sendSessionList(ws);
               },
               (err) => { throw err; },
@@ -452,6 +484,7 @@ export function handleWebSocket() {
                   // Background session finished → notify
                   send(ws, { type: "session_done", sessionId: activeSession.id, text: cleanText } as any);
                 }
+                sendTokenUpdate(ws);
                 sendSessionList(ws);
               },
               (err) => { throw err; },
@@ -636,6 +669,24 @@ export function handleWebSocket() {
           ws.data.notebookActive = !!ns.active;
           ws.data.notebookType = ns.contentType ?? null;
           log("WS", `Notebook state: active=${ws.data.notebookActive} type=${ws.data.notebookType}`);
+          break;
+        }
+
+        // F17: Manual session compaction
+        case "summarize_session": {
+          const active = sessionManager.getActive();
+          if (!active?.openCodeSessionId) {
+            send(ws, { type: "session_summary", sessionId: active?.id ?? "", success: false } as any);
+            break;
+          }
+          log("LLM", `[SUMMARIZE] Manual compaction requested for session ${active.id.slice(0, 8)}`);
+          const success = await summarizeSession(active.openCodeSessionId);
+          if (success) {
+            sessionManager.setSummaryDone(active.id);
+            sendTokenUpdate(ws);
+            sendSessionList(ws);
+          }
+          send(ws, { type: "session_summary", sessionId: active.id, success } as any);
           break;
         }
 
@@ -878,6 +929,7 @@ export async function processAudio(ws: ServerWebSocket<WSData>) {
           send(ws, { type: "task_created", taskId: repTask.id, description: `重複排程：${repeat.prompt}` } as any);
         }
 
+        sendTokenUpdate(ws);
         sendSessionList(ws);
       },
       (err) => {

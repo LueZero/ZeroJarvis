@@ -7,7 +7,7 @@
  * On switch: save current $state → Map, load target Map → $state.
  */
 
-import type { AgentState, PolishResult, ChatMessage, SessionTab, SessionSnapshot, NotebookContent, FoodSearchData, OpenTableResult } from "@zerojarvis/shared";
+import type { AgentState, PolishResult, ChatMessage, SessionTab, SessionSnapshot, NotebookContent, FoodSearchData, OpenTableResult, TokenUsage } from "@zerojarvis/shared";
 
 // --- Per-Session Snapshot (stored for inactive sessions) ---
 interface SessionState {
@@ -58,6 +58,11 @@ let pendingTaskNotifications = $state<TaskNotification[]>([]);
 let activeTaskCount = $state(0);
 let taskItems = $state<TaskItem[]>([]);
 let taskPanelOpen = $state(false);
+
+// --- Token Usage & Summary (F17) ---
+let tokenUsage = $state<TokenUsage | null>(null);
+let summaryPanelOpen = $state(false);
+let lastCompactSuccess = $state<boolean | null>(null);
 
 // --- Multi-Session State ---
 let sessions = $state<SessionTab[]>([]);
@@ -381,4 +386,29 @@ export function clearCompletedTasks() {
 export function removeTask(id: string) {
   taskItems = taskItems.filter(t => t.id !== id);
   if (taskItems.length === 0) taskPanelOpen = false;
+}
+
+// --- Token Usage & Summary (F17) ---
+export function getTokenUsage(): TokenUsage | null {
+  return tokenUsage;
+}
+
+export function setTokenUsage(usage: TokenUsage | null) {
+  tokenUsage = usage;
+}
+
+export function getSummaryPanelOpen(): boolean {
+  return summaryPanelOpen;
+}
+
+export function setSummaryPanelOpen(open: boolean) {
+  summaryPanelOpen = open;
+}
+
+export function getLastCompactSuccess(): boolean | null {
+  return lastCompactSuccess;
+}
+
+export function setLastCompactSuccess(success: boolean | null) {
+  lastCompactSuccess = success;
 }

@@ -27,9 +27,31 @@ app.get("/files/*", async (c) => {
   return c.text("Not Found", 404);
 });
 
-// Health check
-app.get(`${API_PREFIX}/health`, (c) => {
-  return c.json({ status: "ok", timestamp: Date.now() });
+// Health check (F14: includes OpenCode server status)
+app.get(`${API_PREFIX}/health`, async (c) => {
+  const { getHealthStatus } = await import("./llm/client.js");
+  const opencode = getHealthStatus();
+  return c.json({
+    status: "ok",
+    timestamp: Date.now(),
+    opencode: opencode ?? { healthy: false, version: "not-checked", checkedAt: 0 },
+  });
+});
+
+// F18: Manual AGENTS.md init endpoint
+app.post(`${API_PREFIX}/init-agents`, async (c) => {
+  const { getClient, initProject } = await import("./llm/client.js");
+  const { ensureSession } = await import("./session/manager.js");
+  const session = ensureSession();
+  // Need an OpenCode session to run init
+  const client = await getClient();
+  const result = await client.session.create();
+  const ocSession = (result as any).data ?? result;
+  if (!ocSession?.id) {
+    return c.json({ success: false, error: "Failed to create OpenCode session" }, 500);
+  }
+  const success = await initProject(ocSession.id);
+  return c.json({ success });
 });
 
 // REST endpoints

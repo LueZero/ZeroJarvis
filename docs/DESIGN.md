@@ -164,6 +164,8 @@ JSON payload（如 NOTEBOOK）使用 brace-counting 解析，不受巢狀 `]` �
 - 暫停時：FAB 顯示紅色斜線麥克風、無脈動光效、header 隱藏綠色 mic-dot
 - 開啟時：FAB 顯示青色麥克風 + 脈動光暈
 - `submitUserSpeechOnPause: true`：暫停瞬間自動送出已錄音訊（不丟失語音）
+- **語音緩衝機制**：若 AI 正忙（thinking/speaking），`onSpeechEnd` 的音訊暫存於 `pendingAudio`，等 AI 回到 idle 或 TTS 播完後自動送出
+- **防止幽靈事件**：vad.ts 用 `speechInProgress` flag 過濾 AudioWorklet 的殘留事件 — `onSpeechStart` 設定 flag（需 `vadActive=true`），`onSpeechEnd` 檢查 flag 存在才放行
 - 手機版 FAB 縮小至 48px，上移避開底部 UI
 - 觸發詞：「安靜」「不要聽了」「暫停聆聽」
 - 由 Skill 驅動（`.opencode/skills/listen-control/SKILL.md`）
@@ -354,6 +356,42 @@ Worker 啟動 → buildWorkerPrompt()
 | Worker prompt 上限 | 2,000 字元 | 超過截斷 |
 | 歷史載入筆數 | 20 筆 | 啟動時載入 |
 | 歷史過期時間 | 30 天 | 超過不載入 |
+
+### F15：OpenCode 健康檢查（Health Check）
+- 啟動時呼叫 `config.get()` 驗證 OpenCode Server 連線（SDK 無專用 health endpoint）
+- `/api/health` REST endpoint 回傳 `{ status, timestamp, opencode: { healthy, version, checkedAt } }`
+- 健康狀態快取於 Gateway 記憶體，可重複查詢
+- 成功後自動呼叫 `config.providers()` 取得模型 context limit
+
+### F16：結構化輸出（Structured Output）
+- 新增 `chatStructured()` 函式，使用 `session.prompt()` + `format: { type: "json_schema", schema }`
+- JSON Schema 定義：`{ text, actions[], asyncTask?, schedule?, scheduleRepeat? }`
+- 失敗時自動降級為 regex 解析（`parseActions` / `parseAsyncTask` / `parseSchedule` / `parseScheduleRepeat`）
+- 適用於 Worker 任務、Vision 處理等非即時串流場景
+
+### F17：Token 追蹤與壓縮（Token Tracking & Compaction）
+
+**Token 累積：**
+- `step-finish` 事件中累積 `input/output/reasoning/cache` tokens 與 cost
+- 每次 chatStream 完成後透過 `token_update` WebSocket 訊息推送前端
+- 前端 SummaryPanel 顯示即時用量：進度條（🟢<50% → 🟡50-70% → 🔴>70%）、細項分解、累計費用
+
+**壓縮機制：**
+- 呼叫 `session.summarize()` 壓縮對話歷史釋放 context window
+- 手動觸發：前端「壓縮對話」按鈕 → `summarize_session` WS 訊息
+- 自動建議：當 token 使用量 ≥ 70% context limit 時日誌提示
+- 壓縮後重置 token 計數器，SessionTab 顯示 🗜️ 已壓縮標記
+
+**配置值：**
+| 參數 | 值 | 說明 |
+|------|------|------|
+| Context limit 預設 | 200,000 tokens | 從 `config.providers()` 動態取得 |
+| 壓縮閾值 | 70% | `usagePercent >= 70` 時建議壓縮 |
+
+### F18：專案初始化（Project Init）
+- `POST /api/init-agents` 建立 OpenCode Session 並呼叫 `session.init()` 初始化專案
+- 檢查 `.opencode/AGENTS.md` 是否存在，已存在則跳過
+- 用於首次啟動時自動設定 Agent 定義
 
 ### F10：Gateway 串流日誌（Streaming Logs）
 ```

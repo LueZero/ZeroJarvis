@@ -3,7 +3,7 @@
  * Manages multiple parallel OpenCode sessions with voice switching.
  */
 
-import type { SessionTab, SessionStatus, SessionSnapshot, AgentState, NotebookContent } from "@zerojarvis/shared";
+import type { SessionTab, SessionStatus, SessionSnapshot, AgentState, NotebookContent, TokenUsage } from "@zerojarvis/shared";
 
 export interface ManagedSession {
   id: string;
@@ -18,6 +18,8 @@ export interface ManagedSession {
   notebookContent: NotebookContent | null;
   error: string | null;
   createdAt: number;
+  tokenUsage: TokenUsage | null;
+  hasSummary: boolean;
 }
 
 const sessions: Map<string, ManagedSession> = new Map();
@@ -39,6 +41,8 @@ export function createSession(title?: string): ManagedSession {
     notebookContent: null,
     error: null,
     createdAt: Date.now(),
+    tokenUsage: null,
+    hasSummary: false,
   };
   sessions.set(session.id, session);
   sessionOrder.push(session.id);
@@ -140,8 +144,26 @@ export function getAllTabs(): SessionTab[] {
       title: s.title,
       status: s.status,
       active: s.id === activeId,
+      hasSummary: s.hasSummary,
     };
   });
+}
+
+/** Update token usage for a session */
+export function setTokenUsage(id: string, usage: TokenUsage): void {
+  const session = sessions.get(id);
+  if (session) session.tokenUsage = usage;
+}
+
+/** Get token usage for a session */
+export function getTokenUsage(id: string): TokenUsage | null {
+  return sessions.get(id)?.tokenUsage ?? null;
+}
+
+/** Mark that a session has been summarized (compacted) */
+export function setSummaryDone(id: string): void {
+  const session = sessions.get(id);
+  if (session) session.hasSummary = true;
 }
 
 /** Get session by ID */

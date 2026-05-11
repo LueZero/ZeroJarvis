@@ -31,6 +31,7 @@
         <span class="tab-num">#{i + 1}</span>
         <span class="tab-icon">{statusIcon[tab.status] ?? "⏳"}</span>
         <span class="tab-title">{tab.title}</span>
+        {#if tab.hasSummary}<span class="tab-compact" title="已壓縮">🗜️</span>{/if}
       </button>
     {/each}
   </div>

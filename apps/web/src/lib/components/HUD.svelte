@@ -10,6 +10,7 @@
   import SessionTabs from "./SessionTabs.svelte";
   import ScreenCaptureTool from "./ScreenCaptureTool.svelte";
   import TaskPanel from "./TaskPanel.svelte";
+  import SummaryPanel from "./SummaryPanel.svelte";
   import {
     getState,
     setState,
@@ -48,6 +49,8 @@
     getTaskItems,
     getTaskPanelOpen,
     setTaskPanelOpen,
+    setTokenUsage,
+    setLastCompactSuccess,
   } from "$lib/stores/agent.svelte";
   import { initVAD, startVAD, stopVAD, isVADActive } from "$lib/audio/vad";
   import { playAudio, stopAudio, isPlaying, ensureAudioContext } from "$lib/audio/player";
@@ -63,6 +66,9 @@
   let showChatInput = $state(false);
   let screenshotActive = $state(false);
   let notebookRef: NotebookOverlay | undefined = $state(undefined);
+
+  /** Buffered audio from speech that ended while AI was busy */
+  let pendingAudio: ArrayBuffer | null = null;
 
   // Connect to Gateway on mount & auto-start mic
   $effect(() => {
@@ -120,12 +126,12 @@
             setSttText("聆聽中...");
           },
           onSpeechEnd(audio) {
-            // Guard: don't send audio if AI is already processing
+            // If AI is busy, buffer the audio and send when idle
             if (isBusy()) {
-              console.log("HUD | onSpeechEnd blocked — AI is", getState());
+              console.log("HUD | speech ended while busy, buffering", audio.length, "samples");
+              pendingAudio = audio.buffer as ArrayBuffer;
               return;
             }
-            // Allow submitUserSpeechOnPause: send buffered audio even when pausing
             console.log("HUD | speech ended, sending", audio.length, "samples to gateway");
             stopVAD();
             setState("thinking");
@@ -162,9 +168,17 @@
           stopVAD();
         }
         if (msg.state === "idle" && listening && !listenPaused && vadReady) {
-          // Only restart VAD on idle if NOT about to play audio
-          // (tts_end will handle restart after audio playback)
-          if (!isPlaying()) {
+          // Check for buffered audio captured while AI was busy
+          if (pendingAudio) {
+            console.log("HUD | idle — sending buffered audio");
+            const buf = pendingAudio;
+            pendingAudio = null;
+            setState("thinking");
+            setSttText("辨識中...");
+            sendBinary(buf);
+          } else if (!isPlaying()) {
+            // Only restart VAD on idle if NOT about to play audio
+            // (tts_end will handle restart after audio playback)
             startVAD();
             setSttText("");
           }
@@ -194,7 +208,17 @@
           setState("idle");
           setSttText("");
           if (listening && !listenPaused && vadReady) {
-            startVAD();
+            // Check for buffered audio first
+            if (pendingAudio) {
+              console.log("HUD | TTS done — sending buffered audio");
+              const buf = pendingAudio;
+              pendingAudio = null;
+              setState("thinking");
+              setSttText("辨識中...");
+              sendBinary(buf);
+            } else {
+              startVAD();
+            }
           }
         }).catch((err) => {
           console.error("TTS playback failed:", err);
@@ -265,6 +289,12 @@
         break;
       case "task_deleted":
         removeTask((msg as any).taskId);
+        break;
+      case "token_update":
+        setTokenUsage((msg as any).usage);
+        break;
+      case "session_summary":
+        setLastCompactSuccess((msg as any).success);
         break;
       case "food_results":
         setFoodData((msg as any).data);
@@ -394,12 +424,12 @@
               setSttText("聆聽中...");
             },
             onSpeechEnd(audio) {
-              // Guard: don't send audio if AI is already processing
+              // If AI is busy, buffer the audio and send when idle
               if (isBusy()) {
-                console.log("HUD | onSpeechEnd blocked — AI is", getState());
+                console.log("HUD | speech ended while busy, buffering", audio.length, "samples");
+                pendingAudio = audio.buffer as ArrayBuffer;
                 return;
               }
-              // Allow submitUserSpeechOnPause: send buffered audio even when pausing
               console.log("HUD | speech ended, sending", audio.length, "samples to gateway");
               stopVAD();
               setState("thinking");
@@ -538,6 +568,7 @@
       </div>
       <!-- Task badge inline in header -->
       <TaskPanel anchor="header" />
+      <SummaryPanel />
       <button class="menu-toggle" onclick={toggleMenu}>
         <span class="hamburger" class:open={menuOpen}>
           <span></span><span></span><span></span>
