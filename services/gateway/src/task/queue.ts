@@ -3,7 +3,12 @@
  * Tasks are dispatched to OpenCode worker sessions and monitored via EventHub.
  */
 
-import { log, logWarn } from "../logger.js";
+import { log, logWarn, logError } from "../logger.js";
+import { writeFileSync, readdirSync, readFileSync, mkdirSync, existsSync } from "fs";
+import { resolve } from "path";
+import * as memory from "./memory.js";
+
+const TASKS_DIR = resolve(import.meta.dir, "../../../../files/tasks");
 
 export type TaskStatus = "pending" | "running" | "done" | "error";
 export type TaskType = "async" | "scheduled";
@@ -21,8 +26,8 @@ export interface Task {
   createdAt: number;
   scheduledAt?: number;           // For scheduled tasks
   completedAt?: number;
-  repeat?: "daily" | "weekly";    // For repeating schedules
-  repeatTime?: string;            // HH:mm for repeating
+  repeat?: string;                // Repeat pattern: "daily"|"weekly"|"Ns"|"Nm"|"Nh" (e.g. "30s","5m","2h")
+  repeatTime?: string;            // HH:mm for daily/weekly repeats
 }
 
 /** In-memory task store */
@@ -39,7 +44,7 @@ export function createTask(opts: {
   parentSessionId: string;
   type?: TaskType;
   scheduledAt?: number;
-  repeat?: "daily" | "weekly";
+  repeat?: string;
   repeatTime?: string;
 }): Task {
   const task: Task = {
@@ -85,9 +90,77 @@ export function complete(taskId: string, result: string): void {
   task.completedAt = Date.now();
   const elapsed = Math.round((task.completedAt - task.createdAt) / 1000);
   log("TASK", `Task ${taskId.slice(0, 8)} completed (${elapsed}s): "${result.slice(0, 80)}"`);
+
+  // Persist task result to disk
+  persistTask(task);
+
   // Notify listeners
   for (const listener of doneListeners) {
     try { listener(task); } catch (e) { /* ignore */ }
+  }
+}
+
+/** Persist completed task to files/tasks/ and memory */
+function persistTask(task: Task): void {
+  try {
+    mkdirSync(TASKS_DIR, { recursive: true });
+
+    // Save full task record as JSON
+    const record = {
+      id: task.id,
+      type: task.type,
+      prompt: task.prompt,
+      originalPrompt: task.originalPrompt,
+      result: task.result,
+      parentSessionId: task.parentSessionId,
+      createdAt: task.createdAt,
+      completedAt: task.completedAt,
+      status: task.status,
+    };
+    writeFileSync(
+      resolve(TASKS_DIR, `${task.id}.json`),
+      JSON.stringify(record, null, 2),
+      "utf-8",
+    );
+
+    // Save result summary as memory
+    const shortId = task.id.slice(0, 8);
+    const desc = task.prompt.slice(0, 100);
+    const content = task.result?.slice(0, 300) ?? "";
+    memory.saveMemory(
+      `task-${shortId}`,
+      "task-history",
+      desc,
+      content,
+    );
+  } catch (err: any) {
+    logError("TASK", `Failed to persist task ${task.id.slice(0, 8)}: ${err.message}`);
+  }
+}
+
+/** Load recent task history from disk (call at startup) */
+export function loadHistory(maxItems: number = 20): void {
+  try {
+    if (!existsSync(TASKS_DIR)) return;
+    const files = readdirSync(TASKS_DIR)
+      .filter(f => f.endsWith(".json"))
+      .sort()
+      .slice(-maxItems);
+
+    for (const file of files) {
+      try {
+        const raw = readFileSync(resolve(TASKS_DIR, file), "utf-8");
+        const record = JSON.parse(raw);
+        // Skip tasks older than 30 days
+        if (record.completedAt && Date.now() - record.completedAt > 30 * 24 * 60 * 60 * 1000) continue;
+        // Don't overwrite in-memory tasks
+        if (tasks.has(record.id)) continue;
+        tasks.set(record.id, record as Task);
+      } catch { /* skip corrupt files */ }
+    }
+    log("TASK", `Loaded ${files.length} historical tasks from disk`);
+  } catch (err: any) {
+    logWarn("TASK", `Failed to load task history: ${err.message}`);
   }
 }
 
@@ -112,6 +185,13 @@ export function onDone(listener: TaskDoneListener): void {
 /** Get a task by ID */
 export function getTask(taskId: string): Task | undefined {
   return tasks.get(taskId);
+}
+
+/** Delete a task by ID (returns true if found) */
+export function deleteTask(taskId: string): boolean {
+  const existed = tasks.delete(taskId);
+  if (existed) log("TASK", `Deleted task ${taskId.slice(0, 8)}`);
+  return existed;
 }
 
 /** Find task by worker session ID */

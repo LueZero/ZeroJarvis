@@ -9,5 +9,10 @@ target/
 Thumbs.db
 files/captures/*
 files/notebooklm/*
+files/memory/*
+files/tasks/*
 !files/captures/.gitkeep
 !files/notebooklm/.gitkeep
+!files/memory/.gitkeep
+!files/tasks/.gitkeep
+config/schedules.json

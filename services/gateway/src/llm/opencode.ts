@@ -131,15 +131,18 @@ export function parseSchedule(text: string): { cleanText: string; schedule: { ti
   return { cleanText, schedule };
 }
 
-/** Parse [SCHEDULE_REPEAT:daily|weekly:HH:mm:description] markers */
-export function parseScheduleRepeat(text: string): { cleanText: string; repeat: { freq: "daily" | "weekly"; time: string; prompt: string } | null } {
-  const pattern = /\[SCHEDULE_REPEAT:(daily|weekly):(\d{2}:\d{2}):([^\]]+)\]/g;
-  let repeat: { freq: "daily" | "weekly"; time: string; prompt: string } | null = null;
+/** Parse [SCHEDULE_REPEAT:freq:HH:mm:description] markers.
+ *  freq = daily|weekly|monthly|yearly|Ns|Nm|Nh  (e.g. 30s, 5m, 2h) */
+export function parseScheduleRepeat(text: string): { cleanText: string; repeat: { freq: string; time: string; prompt: string } | null } {
+  const pattern = /\[SCHEDULE_REPEAT:(\d+[smh]|hourly|daily|weekly|monthly|yearly):(\d{2}:\d{2}):([^\]]+)\]/g;
+  let repeat: { freq: string; time: string; prompt: string } | null = null;
   let cleanText = text;
 
   const match = pattern.exec(text);
   if (match) {
-    repeat = { freq: match[1] as "daily" | "weekly", time: match[2], prompt: match[3].trim() };
+    // Normalize: "hourly" → "1h"
+    const rawFreq = match[1] === "hourly" ? "1h" : match[1];
+    repeat = { freq: rawFreq, time: match[2], prompt: match[3].trim() };
     cleanText = text.slice(0, match.index) + text.slice(match.index + match[0].length);
     cleanText = cleanText.trim();
   } else {
@@ -147,6 +150,26 @@ export function parseScheduleRepeat(text: string): { cleanText: string; repeat: 
     cleanText = text.replace(/\[SCHEDULE_REPEAT:[^\]]*\]/g, "").trim();
   }
   return { cleanText, repeat };
+}
+
+/** Parse [MEMORY:name:type:content] markers from AI response */
+export function parseMemory(text: string): { cleanText: string; memories: { name: string; type: string; content: string }[] | null } {
+  const pattern = /\[MEMORY:([^:]+):([^:]+):([^\]]+)\]/g;
+  const memories: { name: string; type: string; content: string }[] = [];
+  let cleanText = text;
+
+  let match;
+  while ((match = pattern.exec(text)) !== null) {
+    memories.push({
+      name: match[1].trim(),
+      type: match[2].trim(),
+      content: match[3].trim(),
+    });
+    cleanText = cleanText.replace(match[0], "");
+  }
+
+  cleanText = cleanText.trim();
+  return { cleanText, memories: memories.length > 0 ? memories : null };
 }
 
 /** Get or create an OpenCode session for a managed session */

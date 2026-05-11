@@ -5,7 +5,9 @@
     setTaskPanelOpen,
     clearCompletedTasks,
     getActiveTaskCount,
+    removeTask,
   } from "$lib/stores/agent.svelte";
+  import { send } from "$lib/ws/client";
 
   interface Props {
     anchor?: "header" | "float";
@@ -31,6 +33,11 @@
   const isOpen = $derived(getTaskPanelOpen());
   const runningCount = $derived(getActiveTaskCount());
   const hasCompleted = $derived(items.some(t => t.status !== "running"));
+
+  function handleDelete(taskId: string) {
+    removeTask(taskId);
+    send({ type: "task_delete", taskId });
+  }
 </script>
 
 <!-- Inline wrapper — flows with header layout -->
@@ -128,6 +135,11 @@
                 {/if}
               </div>
             </div>
+            <button class="task-delete" onclick={() => handleDelete(task.id)} title="刪除任務">
+              <svg viewBox="0 0 16 16" fill="currentColor" width="12" height="12">
+                <path d="M4.646 4.646a.5.5 0 01.708 0L8 7.293l2.646-2.647a.5.5 0 01.708.708L8.707 8l2.647 2.646a.5.5 0 01-.708.708L8 8.707l-2.646 2.647a.5.5 0 01-.708-.708L7.293 8 4.646 5.354a.5.5 0 010-.708z"/>
+              </svg>
+            </button>
             {#if task.status === "running"}
               <div class="task-progress-track">
                 <div class="task-progress-bar"></div>
@@ -410,6 +422,34 @@
   .task-content {
     flex: 1;
     min-width: 0;
+  }
+
+  .task-delete {
+    flex-shrink: 0;
+    width: 20px;
+    height: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: none;
+    border: 1px solid transparent;
+    border-radius: 4px;
+    color: var(--text-dim, #6b7280);
+    cursor: pointer;
+    opacity: 0;
+    transition: all 0.2s ease;
+    padding: 0;
+  }
+
+  .task-item:hover .task-delete {
+    opacity: 0.6;
+  }
+
+  .task-delete:hover {
+    opacity: 1 !important;
+    color: var(--danger, #ff5577);
+    border-color: rgba(255, 85, 119, 0.3);
+    background: rgba(255, 85, 119, 0.08);
   }
 
   .task-desc {

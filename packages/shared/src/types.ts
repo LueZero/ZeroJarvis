@@ -20,7 +20,8 @@ export type ClientMessage =
   | { type: "new_chat" }
   | { type: "switch_session"; sessionId: string }
   | { type: "config"; settings: Partial<UserConfig> }
-  | { type: "notebook_state"; active: boolean; contentType?: NotebookContentType };
+  | { type: "notebook_state"; active: boolean; contentType?: NotebookContentType }
+  | { type: "task_delete"; taskId: string };
 
 // --- WebSocket Messages: Server → Client ---
 export type ServerMessage =
@@ -44,7 +45,8 @@ export type ServerMessage =
   // Background Tasks
   | { type: "task_created"; taskId: string; description: string }
   | { type: "task_done"; taskId: string; text: string }
-  | { type: "task_error"; taskId: string; error: string };
+  | { type: "task_error"; taskId: string; error: string }
+  | { type: "task_deleted"; taskId: string };
 
 // --- Polish Result ---
 export interface PolishResult {

@@ -1,7 +1,7 @@
 import type { ServerWebSocket } from "bun";
 import type { ClientMessage, ServerMessage, AgentState, NotebookContentType } from "@zerojarvis/shared";
 import { transcribe } from "../stt/whisper.js";
-import { chatStream, resetSession, parseActions, parseAsyncTask, parseSchedule, parseScheduleRepeat } from "../llm/opencode.js";
+import { chatStream, resetSession, parseActions, parseAsyncTask, parseSchedule, parseScheduleRepeat, parseMemory } from "../llm/opencode.js";
 import { processVision } from "../vision/processor.js";
 import { synthesize } from "../tts/edge-tts.js";
 import { polish } from "../polish/polisher.js";
@@ -11,6 +11,7 @@ import * as taskQueue from "../task/queue.js";
 import * as taskWorker from "../task/worker.js";
 import * as scheduler from "../task/scheduler.js";
 import * as eventHub from "../task/event-hub.js";
+import * as memory from "../task/memory.js";
 
 interface WSData {
   id: string;
@@ -118,6 +119,13 @@ let activeWs: ServerWebSocket<WSData> | null = null;
 
 /** Start background systems (EventHub, Scheduler, Task notifications) */
 export async function startBackgroundSystems(): Promise<void> {
+  // Initialize memory system
+  memory.ensureDir();
+  log("INIT", "Memory system initialized");
+
+  // Load historical task results
+  taskQueue.loadHistory();
+
   // Start global SSE event hub
   await eventHub.start();
   log("INIT", "EventHub started");
@@ -286,7 +294,16 @@ export function handleWebSocket() {
                 processedText = t2;
                 const { cleanText: t3, schedule } = parseSchedule(processedText);
                 processedText = t3;
-                const { cleanText: finalText, repeat } = parseScheduleRepeat(processedText);
+                const { cleanText: t4, repeat } = parseScheduleRepeat(processedText);
+                processedText = t4;
+                const { cleanText: finalText, memories } = parseMemory(processedText);
+
+                // Save AI-generated memories
+                if (memories) {
+                  for (const m of memories) {
+                    memory.saveMemory(m.name, m.type as any, "", m.content);
+                  }
+                }
 
                 if (sessionManager.getActiveId() === managedId) {
                   log("LLM", `Response: "${finalText.slice(0, 80)}..."`);
@@ -361,8 +378,7 @@ export function handleWebSocket() {
             ttsText = parseAsyncTask(ttsText).cleanText;
             ttsText = parseSchedule(ttsText).cleanText;
             ttsText = parseScheduleRepeat(ttsText).cleanText;
-
-            // TTS (only if still active session)
+            ttsText = parseMemory(ttsText).cleanText;
             if (ttsText && sessionManager.getActiveId() === managedId) {
               setState(ws, "speaking");
               const ttsStart = performance.now();
@@ -605,6 +621,16 @@ export function handleWebSocket() {
           break;
         }
 
+        case "task_delete": {
+          const { taskId } = msg as any;
+          if (taskId && taskQueue.deleteTask(taskId)) {
+            scheduler.save(); // Persist schedule changes
+            send(ws, { type: "task_deleted", taskId } as any);
+            log("TASK", `Client deleted task ${taskId.slice(0, 8)}`);
+          }
+          break;
+        }
+
         case "notebook_state": {
           const ns = msg as any;
           ws.data.notebookActive = !!ns.active;
@@ -798,7 +824,16 @@ export async function processAudio(ws: ServerWebSocket<WSData>) {
         processedText = t2;
         const { cleanText: t3, schedule } = parseSchedule(processedText);
         processedText = t3;
-        const { cleanText: finalText, repeat } = parseScheduleRepeat(processedText);
+        const { cleanText: t4, repeat } = parseScheduleRepeat(processedText);
+        processedText = t4;
+        const { cleanText: finalText, memories } = parseMemory(processedText);
+
+        // Save AI-generated memories
+        if (memories) {
+          for (const m of memories) {
+            memory.saveMemory(m.name, m.type as any, "", m.content);
+          }
+        }
 
         if (sessionManager.getActiveId() === managedSessionId) {
           log("LLM", `Response: "${finalText.slice(0, 80)}..."`);
@@ -875,8 +910,7 @@ export async function processAudio(ws: ServerWebSocket<WSData>) {
     ttsText = parseAsyncTask(ttsText).cleanText;
     ttsText = parseSchedule(ttsText).cleanText;
     ttsText = parseScheduleRepeat(ttsText).cleanText;
-
-    // CAPTURE action → release lock early
+    ttsText = parseMemory(ttsText).cleanText;
     if (actions.some(a => a.action === "CAPTURE")) {
       if (ttsText && sessionManager.getActiveId() === managedSessionId) {
         setState(ws, "speaking");

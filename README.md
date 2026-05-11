@@ -38,6 +38,7 @@
 | 「安靜一下」 | 🔇 AI 自動暫停聆聽 |
 | 「30 秒後提醒我開會」 | ⏰ 定時排程 → 時間到語音通知 |
 | 「幫我比較三間日式餐廳」 | 🔄 背景任務執行 → 完成後語音報告 |
+| 「我不吃辣」 | 🧠 持久記憶 → 下次推薦餐廳自動排除辣味 |
 
 > **設計哲學**：所有互動都從語音開始，AI 透過 `[ACTION]` 標記主動控制前端 UI（攝像頭、地圖、截圖工具等），而非被動等待使用者操作。
 
@@ -48,7 +49,8 @@
 - **🎯 ACTION 控制系統** — AI 在回覆中嵌入控制標記，主動驅動前端 UI
 - **🧩 Skill 驅動行為** — 所有 AI 行為由 SKILL.md 定義，支援 [skills.sh](https://skills.sh/) 社群技能
 - **💬 多會話管理** — 無上限平行對話，語音切換，背景處理完成通知
-- **⏰ 背景任務** — AI 自動判斷耗時操作派到背景，定時排程、重複排程，完成後語音通知
+- **⏰ 背景任務** — AI 自動判斷耗時操作派到背景，秒/分/時/日/週/月/年重複排程，任務面板可獨立刪除，完成後語音通知
+- **🧠 跨對話記憶** — 持久化使用者偏好與事實，背景任務自動繼承記憶上下文，任務結果自動持久化
 - **📷 視覺分析** — 攝像頭拍照 + 螢幕截圖，送 Vision Agent 分析
 - **🗺️ 地圖導航** — AI 推薦地點後自動彈出 Google Maps
 - **🍽️ 餐廳訂位** — OpenTable 全自動化（MCP Server + Playwright CDP）
@@ -69,7 +71,7 @@
                        │ WS   │ WS
 ┌──────────────────────▼──────▼───────────────────────────────┐
 │                 Voice Gateway (Bun + Hono)                  │
-│   Gateway:  STT (Groq) │ TTS (edge-tts) │ Session │ Task System  │
+│   Gateway:  STT (Groq) │ TTS (edge-tts) │ Session │ Task │ Memory  │
 └──────────────────────────┬──────────────────────────────────┘
                            │ HTTP/SSE
 ┌──────────────────────────▼──────────────────────────────────┐
@@ -171,7 +173,8 @@ ZeroJarvis/
 │   └── gateway/               # Bun WebSocket 語音閘道           :3100
 │       └── src/
 │           ├── food/          # OpenTable MCP Server (CDP)
-│           └── task/          # 背景任務系統 (Queue + Scheduler + Worker + EventHub)
+│           └── task/          # 背景任務 + 記憶系統
+│               └── memory.ts  #   持久記憶 (files/memory/)
 ├── packages/
 │   └── shared/                # 共用型別與常數
 ├── .opencode/
@@ -187,6 +190,9 @@ ZeroJarvis/
 │       └── notebooklm/        #   NotebookLM 整合
 ├── .agents/skills/            # 社群技能（skills.sh 安裝）
 ├── config/booking.json        # 訂位人資訊
+├── files/
+│   ├── memory/                # 持久記憶 (YAML frontmatter MD)
+│   └── tasks/                 # 任務結果持久化 (JSON)
 ├── docs/DESIGN.md             # 完整設計文件
 ├── start.bat / start.ps1      # Web 版啟動
 └── start-desktop.bat / .ps1   # Desktop 版啟動
@@ -235,7 +241,17 @@ AI 回覆中嵌入任務標記，由 Gateway 解析後派發執行：
 |------|------|
 | `[ASYNC_TASK:描述]` | 立即派發背景 worker 執行 |
 | `[SCHEDULE:ISO時間:描述]` | 指定時間觸發執行 |
-| `[SCHEDULE_REPEAT:daily\|weekly:HH:mm:描述]` | 重複排程 |
+| `[SCHEDULE_REPEAT:頻率:HH:mm:描述]` | 重複排程（`5s`/`1m`/`2h`/`daily`/`weekly`/`monthly`/`yearly`） |
+
+### 記憶標記
+
+AI 發現值得記住的資訊時，在回覆中嵌入記憶標記，自動儲存到持久記憶：
+
+| 標記 | 效果 |
+|------|------|
+| `[MEMORY:名稱:類型:內容]` | 儲存到 `files/memory/` 持久記憶 |
+
+類型：`user`（使用者偏好）、`project`（環境事實）、`task-history`（任務結果）、`reference`（參考資訊）
 
 <details>
 <summary><strong>如何擴充 ACTION</strong></summary>

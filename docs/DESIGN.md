@@ -1,6 +1,6 @@
 # ZeroJarvis — Jarvis 語音個人助理設計文件
 
-> **版本**：0.6.0  
+> **版本**：0.7.0  
 > **日期**：2026-05-11  
 > **代號**：ZeroJarvis (零代理 — 零打字互動)
 
@@ -234,13 +234,13 @@ JSON payload（如 NOTEBOOK）使用 brace-counting 解析，不受巢狀 `]` �
 |------|------|----------|
 | `[ASYNC_TASK:描述]` | 即時背景任務 | 耗時操作（搜尋比較、訂位、多步驟工具鏈） |
 | `[SCHEDULE:ISO時間:描述]` | 定時排程 | 「X 分鐘後」「明天早上」等時間指令 |
-| `[SCHEDULE_REPEAT:daily\|weekly:HH:mm:描述]` | 重複排程 | 「每天」「每週」等週期指令 |
+| `[SCHEDULE_REPEAT:頻率:HH:mm:描述]` | 重複排程 | 「每秒」「每分鐘」「每天」等週期指令（頻率：`Ns`/`Nm`/`Nh`/`daily`/`weekly`/`monthly`/`yearly`） |
 
 **後端架構（4 個模組）：**
 
 | 模組 | 檔案 | 職責 |
 |------|------|------|
-| **TaskQueue** | `task/queue.ts` | 記憶體任務儲存、生命週期管理、完成通知 |
+| **TaskQueue** | `task/queue.ts` | 記憶體任務儲存、生命週期管理、刪除、完成通知 |
 | **Scheduler** | `task/scheduler.ts` | 每 5 秒檢查到期任務、持久化到 `config/schedules.json` |
 | **Worker** | `task/worker.ts` | 建立 OpenCode worker session 執行任務（最多 3 並行） |
 | **EventHub** | `task/event-hub.ts` | 單一 SSE 連線集中派發所有 session 事件 |
@@ -259,8 +259,7 @@ pending → running → done / error
 **前端 Task Panel（科幻風格下拉面板）：**
 - Header 右側 badge 按鈕顯示執行中任務數
 - 展開面板列出所有任務：spinner（執行中）、✓（完成）、✕（失敗）
-- 即時經過時間計時器（每秒更新）
-- 任務完成時自動暫停 VAD → 播報 TTS 結果 → 恢復聆聽
+- 即時經過時間計時器（每秒更新）- 每個任務獨立刪除按鈕（hover 顯示，點擊透過 WS `task_delete` 刪除後端任務 + 排程）- 任務完成時自動暫停 VAD → 播報 TTS 結果 → 恢復聆聽
 - RWD：≥768px 400px 寬、≤600px 全寬
 
 **配置值：**
@@ -269,7 +268,92 @@ pending → running → done / error
 | `CHECK_INTERVAL_MS` | 5,000ms | 排程檢查頻率 |
 | `MAX_CONCURRENT_WORKERS` | 3 | 最大並行 worker 數 |
 | `WORKER_TIMEOUT_MS` | 180,000ms | 單一任務超時（3 分鐘） |
-| 持久化檔案 | `config/schedules.json` | 重啟恢復排程 |
+| 持久化檔案 | `config/schedules.json` | 重啟恢復排程（自動產生，git-ignored） |
+
+**重複排程支援頻率：**
+| 格式 | 說明 | 範例 |
+|------|------|------|
+| `Ns` | 每 N 秒 | `5s`、`30s` |
+| `Nm` | 每 N 分鐘 | `1m`、`10m` |
+| `Nh` | 每 N 小時 | `1h`、`2h` |
+| `daily` | 每天固定時間 | HH:mm 指定 |
+| `weekly` | 每週固定時間 | HH:mm 指定 |
+| `monthly` | 每月固定時間 | HH:mm 指定 |
+| `yearly` | 每年固定時間 | HH:mm 指定 |
+
+### F14：記憶系統（Memory System）
+```
+使用者: 「我不吃辣」
+  → AI 回覆 + [MEMORY:no-spicy:user:使用者不吃辣]
+  → Gateway parseMemory() 解析標記
+  → memory.saveMemory() → files/memory/no-spicy.md（YAML frontmatter MD）
+
+下次背景任務（搜尋餐廳）：
+  → Worker buildWorkerPrompt()
+  → memory.loadAll() → 注入 [user] no-spicy: 不吃辣
+  → Worker 自動排除辣味餐廳
+```
+
+**記憶類型：**
+| 類型 | 說明 | 範例 |
+|------|------|------|
+| `user` | 使用者偏好 | 不吃辣、喜歡簡短回答 |
+| `project` | 環境/專案事實 | 用 Mac、辦公室在信義區 |
+| `task-history` | 過往任務結果摘要 | 任務「比較三間餐廳」完成 |
+| `reference` | 外部參考資訊 | 常去的餐廳列表 |
+
+**儲存格式（YAML frontmatter Markdown）：**
+```markdown
+---
+name: no-spicy
+type: user
+description: 飲食偏好
+created: 2026-05-11T14:30:00Z
+updated: 2026-05-11T14:30:00Z
+---
+使用者不吃辣
+```
+
+**記憶標記格式：**
+| 標記 | 格式 | 觸發時機 |
+|------|------|----------|
+| `[MEMORY:名稱:類型:內容]` | 主對話 + Worker 回覆 | AI 發現值得記住的資訊 |
+
+**後端架構：**
+
+| 模組 | 檔案 | 職責 |
+|------|------|------|
+| **Memory Store** | `task/memory.ts` | 記憶 CRUD + 索引管理 + Prompt 摘要產生 |
+| **Worker 注入** | `task/worker.ts` | `buildWorkerPrompt()` 載入記憶 + 父 session 上下文 |
+| **任務持久化** | `task/queue.ts` | `complete()` 雙寫 JSON + 記憶摘要 |
+| **標記解析** | `llm/opencode.ts` | `parseMemory()` 解析 `[MEMORY:...]` |
+
+**Worker 記憶注入流程：**
+```
+Worker 啟動 → buildWorkerPrompt()
+  → memory.loadAll() 載入所有持久記憶
+  → client.session.messages(parentSessionId) 取最近 3 輪對話
+  → 組合成含「記憶 + 對話上下文 + 任務」的完整 prompt
+  → prompt 上限 2000 字元（超過截斷最舊記憶）
+```
+
+**任務結果持久化：**
+```
+任務完成 → queue.complete()
+  → files/tasks/{taskId}.json（完整 metadata + result）
+  → files/memory/task-{short-id}.md（結果摘要作為記憶）
+  → Gateway 啟動時掃描 files/tasks/ 載入最近 20 筆
+```
+
+**配置值：**
+| 參數 | 值 | 說明 |
+|------|------|------|
+| 記憶儲存路徑 | `files/memory/` | YAML frontmatter MD 檔案 |
+| 任務持久化路徑 | `files/tasks/` | JSON 完整紀錄 |
+| 索引檔 | `files/memory/MEMORY.md` | 自動產生 |
+| Worker prompt 上限 | 2,000 字元 | 超過截斷 |
+| 歷史載入筆數 | 20 筆 | 啟動時載入 |
+| 歷史過期時間 | 30 天 | 超過不載入 |
 
 ### F10：Gateway 串流日誌（Streaming Logs）
 ```
@@ -308,6 +392,10 @@ pending → running → done / error
 │  ┌──────────────────────────────────────────────────────┐ │
 │  │  Background Task System                              │ │
 │  │  EventHub (SSE) │ TaskQueue │ Scheduler │ Worker     │ │
+│  └──────────────────────────────────────────────────────┘ │
+│  ┌──────────────────────────────────────────────────────┐ │
+│  │  Memory System                                       │ │
+│  │  Memory Store (files/memory/) │ Task Persist (files/tasks/) │
 │  └──────────────────────────────────────────────────────┘ │
 │  └────┬─────┘ └────┬─────┘ └────┬─────┘ └──────┬───────┘ │
 └───────┼────────────┼────────────┼───────────────┼─────────┘
@@ -483,7 +571,37 @@ STT 結果 → 關鍵字比對
                                     ▼           ▼
                               [task_done]   [TTS 語音播報]
                               [TaskPanel    [前端暫停 VAD
-                               更新狀態]     播完恢復聆聽]
+                               更新狀態]     播完恢復聆聯]
+```
+
+### 5.6 記憶系統流程（F14）
+
+```
+[使用者語音] "我住在高雄市"
+     │
+     ▼ (STT → chatStream → LLM)
+[Jarvis 回覆] "好的，我記住了。[MEMORY:user-location:project:使用者住在高雄市]"
+     │
+     ▼ (handler.ts onDone)
+[parseMemory()] → 解析 [MEMORY:...] 標記
+     │
+     ▼
+[memory.saveMemory()] → files/memory/user-location.md
+     │
+     ▼ (下次有背景任務時)
+[Worker buildWorkerPrompt()]
+     │ 1. memory.loadAll() 載入所有記憶
+     │ 2. client.session.messages(parentSession) 取最近 3 輪
+     ▼ 3. 組合成含記憶+上下文的 prompt
+[Worker 知道使用者住，可以搜尋附近餐廳]
+
+--- 任務完成時的記憶持久化 ---
+
+[Worker 完成] → finishWorker()
+     │
+     ├─ parseMemory(resultText) → 儲存 Worker 產出的新記憶
+     ├─ queue.complete() → files/tasks/{id}.json（完整紀錄）
+     └─ memory.saveMemory("task-xxx") → files/memory/task-xxx.md（結果摘要）
 ```
 
 ---
@@ -570,6 +688,7 @@ type ClientMessage =
   | { type: "interrupt" }                          // 打斷
   | { type: "new_chat" }                           // 新對話 (reset session)
   | { type: "config"; settings: Partial<Config> }  // 設定
+  | { type: "task_delete"; taskId: string }         // 刪除任務
 
 // Server → Client
 type ServerMessage =
@@ -592,6 +711,7 @@ type ServerMessage =
   | { type: "task_created"; taskId: string; description: string }  // 任務已建立
   | { type: "task_done"; taskId: string; text: string }            // 任務完成（附結果）
   | { type: "task_error"; taskId: string; error: string }          // 任務失敗
+  | { type: "task_deleted"; taskId: string }                       // 任務已刪除
 
 // Session 型別 (F9)
 interface SessionTab {
@@ -668,20 +788,26 @@ zerojarvis/
 │           │   └── processor.ts     # 圖片分析
 │           ├── session/
 │           │   └── manager.ts       # Session 管理
-│           ├── task/                 # 背景任務系統 (F13)
+│           ├── task/                 # 背景任務系統 (F13) + 記憶系統 (F14)
 │           │   ├── event-hub.ts     # 全域 SSE 事件派發
-│           │   ├── queue.ts         # 任務佇列 + 生命週期
+│           │   ├── memory.ts        # 記憶 CRUD + 索引 + prompt 摘要
+│           │   ├── queue.ts         # 任務佇列 + 生命週期 + 持久化
 │           │   ├── scheduler.ts     # 定時排程（5 秒檢查）
-│           │   └── worker.ts        # OpenCode worker session 執行
+│           │   └── worker.ts        # OpenCode worker session 執行（含記憶注入）
 │           ├── ws/
 │           │   └── handler.ts       # WebSocket 訊息路由
 │           └── food/
 │               └── mcp-server.cjs   # OpenTable MCP Server (CDP)
 ├── config/
 │   ├── booking.json                 # 訂位人資訊（姓名/電話/email）
-│   └── schedules.json               # 排程持久化（自動產生）
+│   └── schedules.json               # 排程持久化（自動產生，git-ignored）
 ├── files/                           # 產生的檔案（git-ignored 內容）
 │   ├── captures/                    # 攝像頭截圖 (.jpg)
+│   ├── memory/                      # 持久記憶（YAML frontmatter MD）
+│   │   ├── MEMORY.md               # 自動產生索引
+│   │   └── *.md                     # 個別記憶檔案
+│   ├── tasks/                       # 任務結果持久化（JSON）
+│   │   └── {taskId}.json            # 完整任務紀錄
 │   └── notebooklm/                  # NotebookLM CLI 下載
 │       ├── report-*.md
 │       ├── quiz-*.json
@@ -795,16 +921,26 @@ npx skills remove <name>
 
 ---
 
-## 12. 對話記憶
+## 12. 對話記憶與持久記憶系統
 
+### 12.1 Session 記憶（單次對話）
 - OpenCode 使用 **Session** 持久化對話歷史
 - 同一 Session 內所有對話保留上下文（AI 記得之前說過的話）
 - 多會話管理由 Session Manager 統一控制
 - **Per-Session 獨立狀態**：每個 session 擁有獨立的 UI 快照（LLM 文字、STT、覆蓋層狀態、錯誤）
 - 切換 session 時覆蓋層暫停隱藏（不釋放資源），切回時恢復原狀
-- 語音快捷攔截：「新對話」「上一個」「下一個」→ Gateway 直接處理
-- AI 智慧攔截：複合語句由 session Skill 驅動 → `[ACTION:NEW_SESSION]` 等
+- 語音快捷攚截：「新對話」「上一個」「下一個」→ Gateway 直接處理
+- AI 智慧攚截：複合語句由 session Skill 驅動 → `[ACTION:NEW_SESSION]` 等
 - Vision 使用獨立 Session（不污染主對話，用完即刪）
+
+### 12.2 持久記憶系統（F14）
+- **跨 Session 記憶**：使用者偏好、環境事實、歷史任務結果等持久化到磁碟
+- **儲存格式**：YAML frontmatter Markdown 檔案，存在 `files/memory/`
+- **標記機制**：AI 在回覆中嵌入 `[MEMORY:名稱:類型:內容]` 標記，Gateway 自動解析並儲存
+- **Worker 注入**：背景任務啟動時自動載入所有記憶 + 父 session 最近 3 輪對話
+- **任務持久化**：任務完成時自動雙寫 JSON 紀錄 + 記憶摘要
+- **索引管理**：`files/memory/MEMORY.md` 自動產生，快速概覽所有記憶
+- **啟動恢復**：Gateway 啟動時掃描 `files/tasks/` 載入最近 20 筆歷史任務
 
 ---
 
@@ -819,9 +955,10 @@ npx skills remove <name>
 - [x] OpenTable 自動訂位（MCP Server + Playwright CDP + auth iframe 驗證流程）
 - [x] 社群技能整合（skills.sh 生態系 — find-skills / skill-creator / mcp-builder / claude-api 等 9 個技能）
 - [x] 背景任務系統（ASYNC_TASK 即時背景 + SCHEDULE 定時排程 + SCHEDULE_REPEAT 重複排程 + Task Panel UI）
+- [x] 記憶系統（持久化檔案記憶 + Worker 記憶注入 + 任務結果持久化 + AI 主動寫入記憶）
 - [ ] NotebookLM 線上播放（音視訊 serve + `<audio>`/`<video>` 播放器）
 - [ ] Session 持久化（SQLite，重啟保留歷史）
 - [ ] 語音快捷指令（自訂短語對應動作）
 - [ ] 喚醒詞 "Jarvis" 支援
-- [ ] 記憶系統（向量 DB 長期記憶）
+- [ ] 記憶系統進階（向量 DB 語意搜尋、前端記憶管理 UI）
 - [ ] 多語言 TTS 切換

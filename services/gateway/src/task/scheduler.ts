@@ -19,8 +19,8 @@ interface PersistedSchedule {
   id: string;
   prompt: string;
   scheduledAt?: number;         // Unix ms — one-time
-  repeat?: "daily" | "weekly";
-  repeatTime?: string;          // HH:mm
+  repeat?: string;              // "daily"|"weekly"|"Ns"|"Nm"|"Nh" (e.g. "30s","5m","2h")
+  repeatTime?: string;          // HH:mm for daily/weekly
   parentSessionId: string;
 }
 
@@ -99,7 +99,8 @@ function checkDue(): void {
     if (!task.scheduledAt || task.scheduledAt > now) continue;
 
     log("SCHEDULER", `Task ${task.id.slice(0, 8)} is due: "${task.prompt.slice(0, 40)}"`);
-
+    // Mark as running BEFORE dispatching so save() won't re-persist it
+    taskQueue.setStatus(task.id, "running");
     // Dispatch to worker
     worker.execute(task);
 
@@ -123,19 +124,48 @@ function checkDue(): void {
   }
 }
 
-/** Compute next repeat time from HH:mm and frequency */
-function computeNextRepeat(time: string, freq: "daily" | "weekly"): number {
+/** Parse interval string (e.g. "30s","5m","2h") to milliseconds. Returns 0 if not an interval pattern. */
+function parseIntervalMs(freq: string): number {
+  const m = freq.match(/^(\d+)([smh])$/);
+  if (!m) return 0;
+  const n = parseInt(m[1], 10);
+  switch (m[2]) {
+    case "s": return n * 1_000;
+    case "m": return n * 60_000;
+    case "h": return n * 3_600_000;
+    default: return 0;
+  }
+}
+
+/** Compute next repeat time from repeat pattern and optional HH:mm */
+function computeNextRepeat(time: string, freq: string): number {
+  const now = Date.now();
+
+  // Interval-based: Ns, Nm, Nh (e.g. "30s", "5m", "2h")
+  const intervalMs = parseIntervalMs(freq);
+  if (intervalMs > 0) {
+    return now + intervalMs;
+  }
+
+  // Named frequencies: daily, weekly, monthly, yearly
   const [hours, minutes] = time.split(":").map(Number);
-  const now = new Date();
   const next = new Date();
   next.setHours(hours, minutes, 0, 0);
 
-  // If the time has passed today, move to next occurrence
-  if (next.getTime() <= now.getTime()) {
-    if (freq === "daily") {
-      next.setDate(next.getDate() + 1);
-    } else {
-      next.setDate(next.getDate() + 7);
+  if (next.getTime() <= now) {
+    switch (freq) {
+      case "daily":
+        next.setDate(next.getDate() + 1);
+        break;
+      case "weekly":
+        next.setDate(next.getDate() + 7);
+        break;
+      case "monthly":
+        next.setMonth(next.getMonth() + 1);
+        break;
+      case "yearly":
+        next.setFullYear(next.getFullYear() + 1);
+        break;
     }
   }
 
@@ -159,7 +189,7 @@ export function scheduleOnce(prompt: string, scheduledAt: number, parentSessionI
 export function scheduleRepeat(
   prompt: string,
   repeatTime: string,
-  repeat: "daily" | "weekly",
+  repeat: string,
   parentSessionId: string,
 ): ReturnType<typeof taskQueue.createTask> {
   const nextAt = computeNextRepeat(repeatTime, repeat);

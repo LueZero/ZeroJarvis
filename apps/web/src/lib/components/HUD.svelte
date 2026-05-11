@@ -44,6 +44,7 @@
     addTask,
     completeTask,
     failTask,
+    removeTask,
     getTaskItems,
     getTaskPanelOpen,
     setTaskPanelOpen,
@@ -261,6 +262,9 @@
         decrementActiveTaskCount();
         failTask((msg as any).taskId, (msg as any).error);
         console.error(`❌ Task error: ${(msg as any).error}`);
+        break;
+      case "task_deleted":
+        removeTask((msg as any).taskId);
         break;
       case "food_results":
         setFoodData((msg as any).data);

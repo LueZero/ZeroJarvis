@@ -377,3 +377,8 @@ export function clearCompletedTasks() {
   taskItems = taskItems.filter(t => t.status === "running");
   if (taskItems.length === 0) taskPanelOpen = false;
 }
+
+export function removeTask(id: string) {
+  taskItems = taskItems.filter(t => t.id !== id);
+  if (taskItems.length === 0) taskPanelOpen = false;
+}

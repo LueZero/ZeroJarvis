@@ -8,6 +8,8 @@ import { getClient } from "../llm/client.js";
 import { log, logWarn, logError } from "../logger.js";
 import * as eventHub from "./event-hub.js";
 import * as taskQueue from "./queue.js";
+import * as memory from "./memory.js";
+import * as sessionManager from "../session/manager.js";
 
 const MAX_CONCURRENT_WORKERS = 3;
 const WORKER_TIMEOUT_MS = 180_000; // 3 minutes max per task
@@ -66,8 +68,8 @@ export async function execute(task: ReturnType<typeof taskQueue.getTask>): Promi
       handleWorkerEvent(workerSessionId, evt);
     });
 
-    // Build the worker prompt
-    const workerPrompt = buildWorkerPrompt(task.prompt, task.originalPrompt);
+    // Build the worker prompt (async — loads memories + parent context)
+    const workerPrompt = await buildWorkerPrompt(task.prompt, task.originalPrompt, task.parentSessionId);
 
     // Fire-and-forget prompt to worker session
     client.session.promptAsync({
@@ -88,15 +90,73 @@ export async function execute(task: ReturnType<typeof taskQueue.getTask>): Promi
   }
 }
 
-/** Build the prompt sent to the task-worker agent */
-function buildWorkerPrompt(taskDescription: string, originalPrompt: string): string {
-  return `## 背景任務
+/** Build the prompt sent to the task-worker agent (with memory + parent context) */
+async function buildWorkerPrompt(
+  taskDescription: string,
+  originalPrompt: string,
+  parentSessionId: string,
+): Promise<string> {
+  const sections: string[] = ["## 背景任務\n"];
 
-使用者原始指令：「${originalPrompt}」
+  // 1. Load persistent memories
+  const memorySummary = memory.buildSummary(800);
+  if (memorySummary) {
+    sections.push(`### 記憶（跨 session 持久事實）\n${memorySummary}\n`);
+  }
 
-任務描述：${taskDescription}
+  // 2. Fetch recent parent session context
+  const parentContext = await fetchParentContext(parentSessionId, 3);
+  if (parentContext) {
+    sections.push(`### 近期對話上下文\n${parentContext}\n`);
+  }
 
-請執行以上任務，完成後以簡潔口語化的繁體中文彙報結果。報告不超過 200 字。`;
+  // 3. Task details
+  sections.push(`### 任務\n使用者原始指令：「${originalPrompt}」\n\n任務描述：${taskDescription}`);
+
+  // 4. Instructions
+  sections.push("\n請執行以上任務，完成後以簡潔口語化的繁體中文彙報結果。報告不超過 200 字。");
+
+  // Enforce total prompt length limit
+  let prompt = sections.join("\n");
+  if (prompt.length > 2000) {
+    prompt = prompt.slice(0, 2000) + "\n\n（上下文已截斷）";
+  }
+  return prompt;
+}
+
+/** Fetch last N turns from parent session for worker context */
+async function fetchParentContext(parentSessionId: string, maxTurns: number): Promise<string> {
+  try {
+    const session = sessionManager.getSession(parentSessionId);
+    const openCodeId = session?.openCodeSessionId;
+    if (!openCodeId) return "";
+
+    const client = await getClient();
+    const msgs = await client.session.messages({ path: { id: openCodeId } } as any);
+    const messagesData = (msgs as any).data ?? msgs;
+    if (!Array.isArray(messagesData) || messagesData.length === 0) return "";
+
+    // Extract last N user+assistant text turns
+    const turns: string[] = [];
+    for (let i = messagesData.length - 1; i >= 0 && turns.length < maxTurns * 2; i--) {
+      const msg = messagesData[i];
+      const role = msg.info?.role;
+      if (role !== "user" && role !== "assistant") continue;
+
+      const textParts = (msg.parts ?? [])
+        .filter((p: any) => p?.type === "text" && p?.text)
+        .map((p: any) => p.text.slice(0, 200))
+        .join(" ");
+
+      if (!textParts) continue;
+      const label = role === "user" ? "使用者" : "AI";
+      turns.unshift(`[${label}]: ${textParts}`);
+    }
+    return turns.join("\n");
+  } catch (err: any) {
+    logWarn("WORKER", `Failed to fetch parent context: ${err.message}`);
+    return "";
+  }
 }
 
 /** Handle SSE events from a worker session */
@@ -190,7 +250,16 @@ async function finishWorker(workerSessionId: string): Promise<void> {
   cleanupWorker(workerSessionId);
 
   if (resultText) {
-    taskQueue.complete(worker.taskId, resultText);
+    // Parse and save any [MEMORY:...] markers from worker response
+    const { parseMemory } = await import("../llm/opencode.js");
+    const { cleanText, memories } = parseMemory(resultText);
+    if (memories) {
+      for (const m of memories) {
+        memory.saveMemory(m.name, m.type as any, "", m.content);
+      }
+      log("WORKER", `Worker saved ${memories.length} memories`);
+    }
+    taskQueue.complete(worker.taskId, cleanText);
   } else {
     taskQueue.fail(worker.taskId, "Worker returned empty response");
   }
