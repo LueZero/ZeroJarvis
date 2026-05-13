@@ -219,6 +219,7 @@ export async function chatStream(
   onDone: (fullText: string) => void,
   onError: (err: Error) => void,
   onToolResult?: (toolName: string, output: string) => void,
+  onActivity?: (event: import("@zerojarvis/shared").ActivityEvent) => void,
 ) {
   const startTime = performance.now();
 
@@ -273,6 +274,9 @@ export async function chatStream(
             if (reasoningText.length <= 30 || reasoningText.length % 200 < (delta.length + 5)) {
               log("LLM", `[${ts()}] [REASONING] (+${delta.length}) (${reasoningText.length} total) "${reasoningText.slice(-100)}"`);
             }
+            if (onActivity) {
+              onActivity({ kind: "reasoning", text: reasoningText.slice(-120) });
+            }
           } else {
             if (delta.trim() === message.trim()) return;
             fullText += delta;
@@ -317,6 +321,9 @@ export async function chatStream(
               toolStartTimes.set(toolKey, performance.now());
               const input = state.input ? JSON.stringify(state.input).slice(0, 120) : "";
               log("LLM", `[${ts()}] [TOOL:CALL] ${toolName}(${input})`);
+              if (onActivity) {
+                onActivity({ kind: "tool_start", tool: toolName, input: input.slice(0, 80) });
+              }
             } else if (state?.status === "completed") {
               const elapsed = toolStartTimes.has(toolKey)
                 ? Math.round(performance.now() - toolStartTimes.get(toolKey)!)
@@ -328,9 +335,15 @@ export async function chatStream(
               if (onToolResult) {
                 onToolResult(toolName, fullOutput);
               }
+              if (onActivity) {
+                onActivity({ kind: "tool_done", tool: toolName, output: fullOutput.slice(0, 120), elapsed });
+              }
               toolStartTimes.delete(toolKey);
             } else if (state?.status === "error") {
               log("LLM", `[${ts()}] [TOOL:ERR] ${toolName} → ${state.error ?? "unknown error"}`);
+              if (onActivity) {
+                onActivity({ kind: "tool_error", tool: toolName, error: (state.error ?? "unknown error").slice(0, 100) });
+              }
               toolStartTimes.delete(toolKey);
             } else if (state?.status === "pending") {
               log("LLM", `[${ts()}] [TOOL:PEND] ${toolName}`);
@@ -339,11 +352,25 @@ export async function chatStream(
 
           if (part.type === "step-start") {
             log("LLM", `[${ts()}] [STEP:START] part=${part.id}`);
+            if (onActivity) {
+              onActivity({ kind: "step_start" });
+            }
           }
           if (part.type === "step-finish") {
             const tokens = part.tokens;
             const cost = part.cost ?? 0;
             log("LLM", `[${ts()}] [STEP:FINISH] reason=${part.reason ?? "?"} cost=$${cost.toFixed(4)} tokens=[in:${tokens?.input ?? 0} out:${tokens?.output ?? 0} reasoning:${tokens?.reasoning ?? 0} cache_r:${tokens?.cache?.read ?? 0} cache_w:${tokens?.cache?.write ?? 0}]`);
+            if (onActivity) {
+              onActivity({
+                kind: "step_finish",
+                cost,
+                tokens: {
+                  input: tokens?.input ?? 0,
+                  output: tokens?.output ?? 0,
+                  reasoning: tokens?.reasoning ?? 0,
+                },
+              });
+            }
 
             // F17: Accumulate tokens for this session
             if (tokens) {

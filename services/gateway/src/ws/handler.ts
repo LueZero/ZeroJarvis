@@ -400,6 +400,7 @@ export function handleWebSocket() {
                   } catch {}
                 }
               },
+              (event) => send(ws, { type: "activity", event } as any),
             );
 
             const llmTime = Math.round(performance.now() - textPipelineStart);
@@ -504,6 +505,7 @@ export function handleWebSocket() {
                   } catch {}
                 }
               },
+              (event) => send(ws, { type: "activity", event } as any),
             );
 
             // TTS only if still active session
@@ -951,6 +953,7 @@ export async function processAudio(ws: ServerWebSocket<WSData>) {
           } catch {}
         }
       },
+      (event) => send(ws, { type: "activity", event } as any),
     );
 
     const llmTime = Math.round(performance.now() - llmStart);

@@ -51,7 +51,9 @@ export type ServerMessage =
   | { type: "task_deleted"; taskId: string }
   // Token & Compaction (F17)
   | { type: "token_update"; usage: TokenUsage }
-  | { type: "session_summary"; sessionId: string; success: boolean };
+  | { type: "session_summary"; sessionId: string; success: boolean }
+  // Activity Feed (live opencode events)
+  | { type: "activity"; event: ActivityEvent };
 
 // --- Polish Result ---
 export interface PolishResult {
@@ -200,6 +202,15 @@ export interface TokenUsage {
   contextLimit: number;
   usagePercent: number;
 }
+
+// --- Activity Feed (live opencode events for HUD) ---
+export type ActivityEvent =
+  | { kind: "tool_start"; tool: string; input: string }
+  | { kind: "tool_done"; tool: string; output: string; elapsed: number }
+  | { kind: "tool_error"; tool: string; error: string }
+  | { kind: "reasoning"; text: string }
+  | { kind: "step_start" }
+  | { kind: "step_finish"; cost: number; tokens: { input: number; output: number; reasoning: number } };
 
 // --- NotebookLM Content Display ---
 export type NotebookContentType = "markdown" | "mindmap" | "quiz" | "flashcards" | "media" | "table";

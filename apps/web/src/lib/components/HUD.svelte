@@ -11,6 +11,7 @@
   import ScreenCaptureTool from "./ScreenCaptureTool.svelte";
   import TaskPanel from "./TaskPanel.svelte";
   import SummaryPanel from "./SummaryPanel.svelte";
+  import SideHUD from "./SideHUD.svelte";
   import {
     getState,
     setState,
@@ -51,6 +52,8 @@
     setTaskPanelOpen,
     setTokenUsage,
     setLastCompactSuccess,
+    pushActivity,
+    clearActivityFeed,
   } from "$lib/stores/agent.svelte";
   import { initVAD, startVAD, stopVAD, isVADActive } from "$lib/audio/vad";
   import { playAudio, stopAudio, isPlaying, ensureAudioContext } from "$lib/audio/player";
@@ -160,6 +163,7 @@
         if (msg.state === "thinking") {
           // Clear previous response so new one starts fresh
           setLlmText("");
+          clearActivityFeed();
           // Ensure VAD is stopped during AI processing
           stopVAD();
         }
@@ -300,6 +304,9 @@
         break;
       case "session_summary":
         setLastCompactSuccess((msg as any).success);
+        break;
+      case "activity":
+        pushActivity((msg as any).event);
         break;
       case "food_results":
         setFoodData((msg as any).data);
@@ -550,9 +557,11 @@
   }
 </script>
 
-<div class="hud" class:has-tabs={getSessions().length > 1} class:ai-speaking={getState() === "speaking"} class:user-speaking={getState() === "listening"}>
+<div class="hud" class:has-tabs={getSessions().length > 1} class:ai-speaking={getState() === "speaking"} class:user-speaking={getState() === "listening"} class:ai-thinking={getState() === "thinking"}>
   <!-- Edge glow -->
   <div class="edge-glow"></div>
+  <!-- Sci-fi side panels (thinking / tool-use) -->
+  <SideHUD />
   <!-- Grid lines -->
   <div class="grid-overlay"></div>
   <!-- Header -->
@@ -757,6 +766,12 @@
     animation: glow-user 0.4s ease-in-out infinite;
   }
 
+  /* AI Thinking: pulsing cyan/purple glow */
+  .hud.ai-thinking .edge-glow {
+    opacity: 1;
+    animation: glow-thinking 2s ease-in-out infinite;
+  }
+
   /* Also light up the grid when speaking */
   .hud.ai-speaking .grid-overlay {
     background:
@@ -823,6 +838,21 @@
         inset 0 0 50px rgba(123, 97, 255, 0.38),
         inset 0 0 90px rgba(123, 97, 255, 0.15),
         0 0 40px rgba(123, 97, 255, 0.22);
+    }
+  }
+
+  @keyframes glow-thinking {
+    0%, 100% {
+      box-shadow:
+        inset 0 0 20px rgba(0, 212, 255, 0.1),
+        inset 0 0 40px rgba(123, 97, 255, 0.06),
+        0 0 10px rgba(0, 212, 255, 0.06);
+    }
+    50% {
+      box-shadow:
+        inset 0 0 35px rgba(0, 212, 255, 0.22),
+        inset 0 0 60px rgba(123, 97, 255, 0.1),
+        0 0 25px rgba(0, 212, 255, 0.12);
     }
   }
 

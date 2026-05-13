@@ -412,3 +412,30 @@ export function getLastCompactSuccess(): boolean | null {
 export function setLastCompactSuccess(success: boolean | null) {
   lastCompactSuccess = success;
 }
+
+// --- Activity Feed (live opencode events for side HUD) ---
+import type { ActivityEvent } from "@zerojarvis/shared";
+
+export interface ActivityItem {
+  id: number;
+  event: ActivityEvent;
+  timestamp: number;
+}
+
+let activityFeed = $state<ActivityItem[]>([]);
+let activityCounter = 0;
+const MAX_ACTIVITY_ITEMS = 30;
+
+export function pushActivity(event: ActivityEvent) {
+  activityCounter++;
+  const item: ActivityItem = { id: activityCounter, event, timestamp: Date.now() };
+  activityFeed = [...activityFeed.slice(-(MAX_ACTIVITY_ITEMS - 1)), item];
+}
+
+export function getActivityFeed(): ActivityItem[] {
+  return activityFeed;
+}
+
+export function clearActivityFeed() {
+  activityFeed = [];
+}
