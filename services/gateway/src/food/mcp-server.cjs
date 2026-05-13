@@ -402,30 +402,346 @@ async function dismissOverlays(pg) {
   } catch {}
 }
 
+// ── Helper: find auth frame using multiple strategies ──
+async function findAuthFrame(pg) {
+  // Strategy 1: frames() URL matching
+  for (const f of pg.frames()) {
+    const url = f.url();
+    if (url.includes('/authenticate/') || url.includes('/auth/') || url.includes('authentication')) {
+      return { frame: f, type: 'frame' };
+    }
+  }
+  // Strategy 2: frames() — any non-main frame with phone input
+  for (const f of pg.frames()) {
+    if (f === pg.mainFrame()) continue;
+    const fUrl = f.url();
+    if (!fUrl || fUrl === 'about:blank') continue;
+    try {
+      const hasPhone = await f.evaluate(() => !!document.querySelector('#phoneNumber')).catch(() => false);
+      if (hasPhone) return { frame: f, type: 'frame' };
+    } catch {}
+  }
+  // Strategy 3: frameLocator via DOM element
+  const selectors = [
+    'iframe#authenticationModalIframe',
+    'iframe[id*="auth" i]',
+    'iframe[data-test*="auth" i]',
+    'iframe[src*="auth" i]',
+  ];
+  for (const sel of selectors) {
+    try {
+      const loc = pg.frameLocator(sel);
+      const bodyCount = await loc.locator('body').count().catch(() => 0);
+      if (bodyCount > 0) return { frame: loc, type: 'frameLocator' };
+    } catch {}
+  }
+  // Strategy 4: any visible iframe
+  try {
+    const loc = pg.frameLocator('iframe:visible');
+    const bodyCount = await loc.locator('body').count().catch(() => 0);
+    if (bodyCount > 0) return { frame: loc, type: 'frameLocator' };
+  } catch {}
+  return null;
+}
+
+// ── Auth via frameLocator (fallback for CDP-connected browsers) ──
+// When pg.frames() can't find the iframe, use Playwright's frameLocator API
+// which works by targeting the iframe DOM element directly.
+async function handleAuthViaFrameLocator(pg, phone, countryCode) {
+  process.stderr.write(`[mcp] 使用 frameLocator 方式處理 auth iframe\n`);
+
+  // Try multiple selectors to find the iframe
+  const selectors = [
+    'iframe#authenticationModalIframe',
+    'iframe[id*="auth" i]',
+    'iframe[data-test*="auth" i]',
+    'iframe[src*="auth" i]',
+    'iframe:visible',
+  ];
+
+  let fl = null;
+  for (const sel of selectors) {
+    try {
+      const loc = pg.frameLocator(sel);
+      // Test if this frameLocator actually works by checking for content
+      const phoneCount = await loc.locator('#phoneNumber').count().catch(() => 0);
+      const bodyCount = await loc.locator('body').count().catch(() => 0);
+      if (phoneCount > 0 || bodyCount > 0) {
+        fl = loc;
+        process.stderr.write(`[mcp] frameLocator 成功: ${sel} (phone=${phoneCount})\n`);
+        break;
+      }
+    } catch {}
+  }
+
+  if (!fl) {
+    process.stderr.write(`[mcp] frameLocator 也找不到可用的 iframe\n`);
+    return { found: false };
+  }
+
+  // Wait for phone field
+  let hasPhone = false;
+  let hasCodeInput = false;
+  for (let i = 0; i < 8; i++) {
+    hasPhone = await fl.locator('#phoneNumber').count().catch(() => 0) > 0;
+    hasCodeInput = await fl.locator('input[data-test*="code" i], input[id*="code" i], input[id*="otp" i]').count().catch(() => 0) > 0;
+    if (hasPhone || hasCodeInput) break;
+    await pg.waitForTimeout(1000);
+    process.stderr.write(`[mcp] frameLocator: 等待元素... (${i + 1}/8)\n`);
+  }
+
+  if (hasCodeInput) {
+    const text = await fl.locator('body').innerText().catch(() => '');
+    return { found: true, needsVerificationCode: true, message: text.slice(0, 800) };
+  }
+
+  if (!hasPhone) {
+    const text = await fl.locator('body').innerText().catch(() => '');
+    process.stderr.write(`[mcp] frameLocator: 找不到 phone 欄位, 內容: ${text.slice(0, 300)}\n`);
+    return { found: true, handled: false, message: text.slice(0, 800) };
+  }
+
+  // Phone is empty — can't proceed
+  if (!phone) {
+    process.stderr.write(`[mcp] 無電話號碼，無法完成簡訊驗證\n`);
+    return { found: true, handled: false, message: '缺少電話號碼，無法完成簡訊驗證。' };
+  }
+
+  // Select country code
+  try {
+    const ccMap = { TW: '886', US: '1', JP: '81', KR: '82', CN: '86', HK: '852', SG: '65' };
+    const dialCode = ccMap[countryCode] || countryCode;
+    const ccSelect = fl.locator('#phoneNumberCountryCode');
+    if (await ccSelect.count() > 0) {
+      // Get options to find correct value
+      const options = await ccSelect.locator('option').allInnerTexts().catch(() => []);
+      process.stderr.write(`[mcp] 國碼選項: ${options.slice(0, 5).join(', ')}...\n`);
+      // Try selecting by country code or dial code
+      await ccSelect.selectOption({ label: options.find(t => t.includes(`+${dialCode}`)) || countryCode }).catch(async () => {
+        await ccSelect.selectOption(countryCode).catch(() => {});
+      });
+      process.stderr.write(`[mcp] frameLocator: 已選擇國碼\n`);
+    }
+  } catch (e) {
+    process.stderr.write(`[mcp] frameLocator: 國碼選擇失敗: ${e.message}\n`);
+  }
+
+  // Fill phone — strip leading 0 for international format
+  let phoneNum = phone;
+  if (phoneNum.startsWith('0') && countryCode && countryCode !== 'US') {
+    phoneNum = phoneNum.slice(1);
+  }
+
+  try {
+    const phoneInput = fl.locator('#phoneNumber');
+    await phoneInput.click({ timeout: 3000 });
+    await phoneInput.fill('');
+    // Type char by char for reliability
+    for (const ch of phoneNum) {
+      await phoneInput.type(ch, { delay: 40 + Math.random() * 60 });
+    }
+    process.stderr.write(`[mcp] frameLocator: 已填寫電話: ${phoneNum}\n`);
+  } catch (e) {
+    process.stderr.write(`[mcp] frameLocator: 填寫電話失敗: ${e.message}\n`);
+    return { found: true, handled: false, message: `填寫電話失敗: ${e.message}` };
+  }
+
+  // Click 繼續
+  await pg.waitForTimeout(500);
+  try {
+    // Try multiple selectors for the continue button
+    const btnSelectors = [
+      'button[data-test="continue-button"]',
+      'button:has-text("繼續")',
+      'button[type="submit"]',
+    ];
+    let clicked = false;
+    for (const btnSel of btnSelectors) {
+      const btn = fl.locator(btnSel);
+      if (await btn.count() > 0) {
+        await btn.first().click({ timeout: 5000 }).catch(async () => {
+          await btn.first().click({ force: true, timeout: 5000 });
+        });
+        process.stderr.write(`[mcp] frameLocator: 已點擊繼續 (${btnSel})\n`);
+        clicked = true;
+        break;
+      }
+    }
+    if (!clicked) {
+      process.stderr.write(`[mcp] frameLocator: 找不到繼續按鈕\n`);
+    }
+  } catch (e) {
+    process.stderr.write(`[mcp] frameLocator: 點擊繼續失敗: ${e.message}\n`);
+  }
+
+  // Wait and check next state
+  await pg.waitForTimeout(5000);
+
+  // Check main page
+  if (pg.url().includes('/confirmation')) {
+    return { found: true, success: true };
+  }
+
+  // Check for verification code input
+  for (let codeCheck = 0; codeCheck < 3; codeCheck++) {
+    const codeExists = await fl.locator('#emailVerificationCode, input[data-test*="code" i], input[id*="code" i], input[id*="otp" i]').count().catch(() => 0) > 0;
+    const text = await fl.locator('body').innerText().catch(() => '');
+    const needsCode = text.includes('驗證碼') || text.includes('確認碼') || text.includes('verification code') || text.includes('enter the code') || text.includes('請輸入驗證碼');
+    const needsDetails = text.includes('最後一步') || text.includes('確認你的詳細資料') || text.includes('名字');
+
+    process.stderr.write(`[mcp] frameLocator 狀態(${codeCheck}): code=${codeExists} needsCode=${needsCode} details=${needsDetails}\n`);
+
+    if (needsCode || codeExists) {
+      return { found: true, needsVerificationCode: true, message: text.slice(0, 800) };
+    }
+    if (needsDetails) {
+      return { found: true, needsDetails: true, message: text.slice(0, 800) };
+    }
+    await pg.waitForTimeout(2000);
+  }
+
+  return { found: true, submitted: true, message: '' };
+}
+
 // ── Auth Iframe Handler ──
 // After clicking 完成訂位, OpenTable shows an authentication iframe
 // with phone number input for SMS verification.
 
 async function handleAuthIframe(pg, phone, countryCode) {
-  // Retry finding auth iframe — may take time to load after clicking submit
-  let authFrame = null;
-  for (let retry = 0; retry < 6; retry++) {
-    authFrame = pg.frames().find(f => f.url().includes('/authenticate/'));
-    if (authFrame) break;
-    await pg.waitForTimeout(1000);
+  process.stderr.write(`[mcp] handleAuthIframe 開始，phone=${phone ? '有' : '無'}\n`);
+
+  // Debug: list all frames
+  const allFrames = pg.frames();
+  process.stderr.write(`[mcp] 頁面共有 ${allFrames.length} 個 frames\n`);
+  for (const f of allFrames) {
+    process.stderr.write(`[mcp]   frame: ${f.url().slice(0, 120)}\n`);
   }
-  if (!authFrame) return { found: false };
 
-  process.stderr.write(`[mcp] 偵測到驗證 iframe\n`);
+  // ── Strategy 1: find auth frame via pg.frames() URL matching ──
+  let authFrame = null;
+  for (let retry = 0; retry < 10; retry++) {
+    for (const f of pg.frames()) {
+      const url = f.url();
+      if (url.includes('/authenticate/') || url.includes('/auth/') || url.includes('authentication')) {
+        authFrame = f;
+        break;
+      }
+    }
+    if (authFrame) break;
 
-  const iframeState = await authFrame.evaluate(() => ({
-    hasPhone: !!document.querySelector('#phoneNumber'),
-    hasCodeInput: !!(document.querySelector('input[data-test*="code" i]') || document.querySelector('input[id*="code" i]') || document.querySelector('input[id*="otp" i]')),
-    text: (document.body?.innerText || '').slice(0, 800),
-  })).catch(() => ({ hasPhone: false, hasCodeInput: false, text: '' }));
+    // Also check if any non-main frame has phone input
+    for (const f of pg.frames()) {
+      if (f === pg.mainFrame()) continue;
+      const fUrl = f.url();
+      if (!fUrl || fUrl === 'about:blank') continue;
+      try {
+        const hasPhone = await f.evaluate(() => !!document.querySelector('#phoneNumber')).catch(() => false);
+        if (hasPhone) {
+          authFrame = f;
+          process.stderr.write(`[mcp] 透過 phone 欄位找到 frame: ${fUrl.slice(0, 120)}\n`);
+          break;
+        }
+      } catch {}
+    }
+    if (authFrame) break;
 
-  if (!iframeState.hasPhone) {
+    await pg.waitForTimeout(1000);
+    if (retry % 3 === 2) process.stderr.write(`[mcp] 等待驗證 iframe... (${retry + 1}/10)\n`);
+  }
+
+  // ── Strategy 2: use frameLocator if frames() didn't find it ──
+  // This works better with CDP-connected browsers where frames() may be incomplete
+  let useFrameLocator = false;
+  if (!authFrame) {
+    process.stderr.write(`[mcp] frames() 找不到 auth iframe，嘗試 frameLocator...\n`);
+
+    // Check if the iframe element exists in DOM
+    const iframeSelectors = [
+      'iframe#authenticationModalIframe',
+      'iframe[id*="auth" i]',
+      'iframe[data-test*="auth" i]',
+      'iframe[src*="auth" i]',
+      'iframe[src*="authenticate" i]',
+    ];
+
+    let iframeSelector = null;
+    for (const sel of iframeSelectors) {
+      try {
+        const count = await pg.locator(sel).count();
+        if (count > 0) {
+          iframeSelector = sel;
+          process.stderr.write(`[mcp] 找到 iframe 元素: ${sel}\n`);
+          break;
+        }
+      } catch {}
+    }
+
+    // If no auth-specific iframe, look for ANY visible iframe
+    if (!iframeSelector) {
+      try {
+        const iframeInfo = await pg.evaluate(() => {
+          const iframes = document.querySelectorAll('iframe');
+          return Array.from(iframes).map(f => ({
+            id: f.id,
+            src: f.src,
+            visible: f.offsetParent !== null || f.getBoundingClientRect().height > 0,
+            classes: f.className,
+          }));
+        });
+        process.stderr.write(`[mcp] 頁面上所有 iframe: ${JSON.stringify(iframeInfo)}\n`);
+
+        // Find the first visible iframe that's likely the auth modal
+        for (const info of iframeInfo) {
+          if (info.visible && info.src) {
+            iframeSelector = info.id ? `iframe#${info.id}` : `iframe[src="${info.src}"]`;
+            process.stderr.write(`[mcp] 使用可見 iframe: ${iframeSelector}\n`);
+            break;
+          }
+        }
+      } catch (e) {
+        process.stderr.write(`[mcp] 列舉 iframe 失敗: ${e.message}\n`);
+      }
+    }
+
+    if (iframeSelector) {
+      useFrameLocator = true;
+      // We'll use frameLocator approach below
+    } else {
+      return { found: false };
+    }
+  }
+
+  if (authFrame) {
+    process.stderr.write(`[mcp] 偵測到驗證 iframe (frames): ${authFrame.url().slice(0, 100)}\n`);
+  }
+
+  // ── Fill phone number ──
+  if (useFrameLocator) {
+    return await handleAuthViaFrameLocator(pg, phone, countryCode);
+  }
+
+  // Wait for phone field to render inside iframe (retry up to 8 seconds)
+  let iframeState = { hasPhone: false, hasCodeInput: false, text: '' };
+  for (let waitRetry = 0; waitRetry < 8; waitRetry++) {
+    iframeState = await authFrame.evaluate(() => ({
+      hasPhone: !!document.querySelector('#phoneNumber'),
+      hasCodeInput: !!(document.querySelector('input[data-test*="code" i]') || document.querySelector('input[id*="code" i]') || document.querySelector('input[id*="otp" i]')),
+      hasEmailSwitch: !!(document.querySelector('a[href*="email"]') || document.querySelector('button[data-test*="email" i]') || (document.body?.innerText || '').includes('改用電子郵件')),
+      text: (document.body?.innerText || '').slice(0, 800),
+    })).catch(() => ({ hasPhone: false, hasCodeInput: false, hasEmailSwitch: false, text: '' }));
+
+    if (iframeState.hasPhone || iframeState.hasCodeInput) break;
+    await pg.waitForTimeout(1000);
+    process.stderr.write(`[mcp] 等待 iframe 內元素載入... (${waitRetry + 1}/8)\n`);
+  }
+
+  if (!iframeState.hasPhone && !iframeState.hasCodeInput) {
+    process.stderr.write(`[mcp] iframe 內容: ${iframeState.text.slice(0, 300)}\n`);
     return { found: true, handled: false, message: iframeState.text };
+  }
+
+  if (iframeState.hasCodeInput) {
+    return { found: true, needsVerificationCode: true, message: iframeState.text };
   }
 
   // Select country code
@@ -449,6 +765,10 @@ async function handleAuthIframe(pg, phone, countryCode) {
 
   // Fill phone — strip leading 0 for international format
   let phoneNum = phone || '';
+  if (!phoneNum) {
+    process.stderr.write(`[mcp] 無電話號碼，無法完成簡訊驗證\n`);
+    return { found: true, handled: false, message: '缺少電話號碼，無法完成簡訊驗證。請在 config/booking.json 設定 phone 或在指令中提供 phone 參數。' };
+  }
   if (phoneNum.startsWith('0') && countryCode && countryCode !== 'US') {
     phoneNum = phoneNum.slice(1);
   }
@@ -775,11 +1095,24 @@ async function bookOpenTable(restaurant, date, time, partySize, name, phone, ema
     async function fillBookingForm(pg, { firstName, lastName, phone, email, specialReq }) {
       const filled = { phone: false, email: false, firstName: false, lastName: false };
 
+      // Helper: check if element exists AND is visible before filling
+      async function safeFill(el, value) {
+        if (!el || !value) return false;
+        try {
+          const visible = await el.isVisible().catch(() => false);
+          if (!visible) return false;
+          await el.click({ timeout: 3000 }).catch(() => {});
+          await el.fill(value);
+          return true;
+        } catch (e) {
+          process.stderr.write(`[mcp] safeFill 失敗: ${e.message.slice(0, 80)}\n`);
+          return false;
+        }
+      }
+
       // First, try to fill phone (preferred path — phone mode)
       const phInput = await pg.$('#phoneNumber');
-      if (phInput) {
-        await phInput.click({ timeout: 3000 }).catch(() => {});
-        await phInput.fill(phone || "");
+      if (await safeFill(phInput, phone)) {
         filled.phone = true;
       }
 
@@ -793,27 +1126,26 @@ async function bookOpenTable(restaurant, date, time, partySize, name, phone, ema
         }
         // Now look for email input
         const emInput = await pg.$('#email, input[type="email"], input[id*="email" i], input[placeholder*="email" i]');
-        if (emInput) {
-          await emInput.click({ timeout: 3000 }).catch(() => {});
-          await emInput.fill(email || "");
+        if (await safeFill(emInput, email)) {
           filled.email = true;
         }
       }
 
       // First name (usually only appears after verification or on re-fill)
       const fnInput = await pg.$('#firstName, input[data-test*="first" i], input[id*="first" i], input[placeholder*="名" i], input[aria-label*="名" i]');
-      if (fnInput) { await fnInput.click({ timeout: 3000 }).catch(() => {}); await fnInput.fill(firstName || ""); filled.firstName = true; }
+      if (await safeFill(fnInput, firstName)) { filled.firstName = true; }
 
       // Last name
       const lnInput = await pg.$('#lastName, input[data-test*="last" i], input[id*="last" i], input[placeholder*="姓" i], input[aria-label*="姓" i]');
-      if (lnInput) { await lnInput.click({ timeout: 3000 }).catch(() => {}); await lnInput.fill(lastName || ""); filled.lastName = true; }
+      if (await safeFill(lnInput, lastName)) { filled.lastName = true; }
 
       // Special requests
       if (specialReq) {
         const ta = await pg.$('#specialRequest');
-        if (ta) { await ta.click({ timeout: 3000 }).catch(() => {}); await ta.fill(specialReq); }
+        await safeFill(ta, specialReq);
       }
 
+      process.stderr.write(`[mcp] fillBookingForm 結果: ${JSON.stringify(filled)}\n`);
       await pg.waitForTimeout(500);
       return filled;
     }
@@ -828,8 +1160,45 @@ async function bookOpenTable(restaurant, date, time, partySize, name, phone, ema
       specialReq: specialRequest || "",
     };
 
+    // Pre-check: at least one contact method required
+    if (!formData.phone && !formData.email) {
+      await page.close();
+      return { success: false, message: "缺少聯絡方式：請在 config/booking.json 設定 phone 或 email，或在指令中提供 phone/email 參數。", searchUrl };
+    }
+
     // Dismiss cookie consent and other overlays before interaction
     await dismissOverlays(page);
+
+    // Check for credit card requirement — abort before filling form
+    const creditCardCheck = await page.evaluate(() => {
+      const text = (document.body?.innerText || '').toLowerCase();
+      const hasCCInput = !!(
+        document.querySelector('input[id*="card" i]') ||
+        document.querySelector('input[name*="card" i]') ||
+        document.querySelector('input[data-test*="card" i]') ||
+        document.querySelector('input[autocomplete="cc-number"]') ||
+        document.querySelector('input[id*="cvv" i]') ||
+        document.querySelector('input[id*="cvc" i]') ||
+        document.querySelector('[class*="credit-card" i]') ||
+        document.querySelector('[class*="creditCard" i]') ||
+        document.querySelector('[class*="CardNumber" i]')
+      );
+      const hasCCText = text.includes('信用卡') || text.includes('credit card') || text.includes('卡號') ||
+                        text.includes('card number') || text.includes('到期日') || text.includes('expiration') ||
+                        text.includes('cvv') || text.includes('cvc') || text.includes('安全碼');
+      return { hasCCInput, hasCCText, needsCC: hasCCInput || hasCCText };
+    });
+    if (creditCardCheck.needsCC) {
+      process.stderr.write(`[mcp] ⚠ 偵測到信用卡欄位！input=${creditCardCheck.hasCCInput} text=${creditCardCheck.hasCCText}\n`);
+      await page.close();
+      return {
+        success: false,
+        requiresCreditCard: true,
+        slotSelected: slotTime,
+        message: `此餐廳（${restaurant}）的訂位需要提供信用卡資訊，為安全起見已自動中止。請手動前往 OpenTable 完成訂位。`,
+        searchUrl,
+      };
+    }
 
     // Initial fill — try to fill whatever fields are visible
     let filled = await fillBookingForm(page, formData);
@@ -838,10 +1207,13 @@ async function bookOpenTable(restaurant, date, time, partySize, name, phone, ema
     // Semi-auto strategy: try to click submit, but if reCAPTCHA blocks it,
     // fall back to asking the user to click it manually.
     let submitted = await clickSubmitButton(page);
+    process.stderr.write(`[mcp] clickSubmitButton 結果: ${submitted || 'null (未找到按鈕)'}\n`);
 
     // Check for auth iframe (appears after clicking submit for logged-in users)
     await page.waitForTimeout(3000);
+    process.stderr.write(`[mcp] 檢查 auth iframe...\n`);
     const authResult = await handleAuthIframe(page, formData.phone, bookingConfig.user?.countryCode || "TW");
+    process.stderr.write(`[mcp] handleAuthIframe 結果: found=${authResult.found} success=${authResult.success} needsCode=${authResult.needsVerificationCode} needsDetails=${authResult.needsDetails} handled=${authResult.handled}\n`);
     if (authResult.found) {
       if (authResult.success) {
         await page.close();
@@ -874,11 +1246,77 @@ async function bookOpenTable(restaurant, date, time, partySize, name, phone, ema
           }
         }
       }
-      // Auth iframe found but unknown state — log and continue
-      process.stderr.write(`[mcp] Auth iframe 狀態: ${authResult.message?.slice(0, 200)}\n`);
+      // Auth iframe found but unknown state — retry once more with longer wait
+      process.stderr.write(`[mcp] Auth iframe 狀態不明 (handled=${authResult.handled}): ${authResult.message?.slice(0, 200)}\n`);
+      
+      // The iframe is visible but we couldn't interact with it — try again
+      await page.waitForTimeout(3000);
+      const authRetry2 = await handleAuthIframe(page, formData.phone, bookingConfig.user?.countryCode || "TW");
+      if (authRetry2.found && authRetry2.needsVerificationCode) {
+        pendingBooking = { page, formData, fillBookingForm, clickSubmitButton, restaurant, date, time, partySize, slotTime, searchUrl, submitted };
+        return {
+          success: false, needsVerification: true, needsCode: true, slotSelected: slotTime, submitted,
+          message: "已填寫電話號碼並送出。OpenTable 會發送簡訊驗證碼到你的手機，請告訴我收到的驗證碼數字。", searchUrl,
+        };
+      }
+      if (authRetry2.found && authRetry2.success) {
+        await page.close();
+        return { success: true, slotSelected: slotTime, submitted, message: `訂位成功！${restaurant} ${date} ${time} ${partySize}位`, searchUrl };
+      }
+      if (authRetry2.found && authRetry2.needsDetails) {
+        const detailsFilled = await fillDetailsInAuthIframe(page, formData);
+        if (detailsFilled) {
+          await page.waitForTimeout(3000);
+          if (page.url().includes("/confirmation")) {
+            await page.close();
+            return { success: true, slotSelected: slotTime, submitted, message: `訂位成功！${restaurant} ${date} ${time} ${partySize}位`, searchUrl };
+          }
+        }
+      }
+      // Still unknown — keep page alive and tell user
+      if (authRetry2.found && !authRetry2.success && !authRetry2.needsVerificationCode) {
+        pendingBooking = { page, formData, fillBookingForm, clickSubmitButton, restaurant, date, time, partySize, slotTime, searchUrl, submitted };
+        return {
+          success: false, waitingForUserSubmit: true, slotSelected: slotTime, submitted,
+          message: `訂位流程需要驗證，但自動填寫失敗。請手動在瀏覽器中完成驗證。(${authRetry2.message?.slice(0, 100) || '未知狀態'})`,
+          searchUrl,
+        };
+      }
+    }
+
+    // If auth iframe was not found on first attempt, try again (it may appear late)
+    if (!authResult.found) {
+      await page.waitForTimeout(3000);
+      const authRetry = await handleAuthIframe(page, formData.phone, bookingConfig.user?.countryCode || "TW");
+      if (authRetry.found) {
+        if (authRetry.success) {
+          await page.close();
+          return { success: true, slotSelected: slotTime, submitted, message: `訂位成功！${restaurant} ${date} ${time} ${partySize}位`, searchUrl };
+        }
+        if (authRetry.needsVerificationCode) {
+          pendingBooking = { page, formData, fillBookingForm, clickSubmitButton, restaurant, date, time, partySize, slotTime, searchUrl, submitted };
+          return {
+            success: false, needsVerification: true, needsCode: true, slotSelected: slotTime, submitted,
+            message: "已填寫電話號碼並送出。OpenTable 會發送簡訊驗證碼到你的手機，請告訴我收到的驗證碼數字。", searchUrl,
+          };
+        }
+        if (authRetry.needsDetails) {
+          process.stderr.write(`[mcp] Auth iframe (retry) 需要填寫詳細資料\n`);
+          const detailsFilled = await fillDetailsInAuthIframe(page, formData);
+          if (detailsFilled) {
+            await page.waitForTimeout(3000);
+            if (page.url().includes("/confirmation")) {
+              await page.close();
+              return { success: true, slotSelected: slotTime, submitted, message: `訂位成功！${restaurant} ${date} ${time} ${partySize}位`, searchUrl };
+            }
+          }
+        }
+        process.stderr.write(`[mcp] Auth iframe (retry) 狀態: ${authRetry.message?.slice(0, 200)}\n`);
+      }
     }
 
     // Quick check (6 seconds): did the page change after clicking submit?
+    process.stderr.write(`[mcp] 進入 quick check 階段，目前 URL: ${page.url().slice(0, 100)}\n`);
     let pageChanged = false;
     for (let quickCheck = 0; quickCheck < 2; quickCheck++) {
       await page.waitForTimeout(3000);
@@ -943,6 +1381,7 @@ async function bookOpenTable(restaurant, date, time, partySize, name, phone, ema
     const finalUrl = page.url();
     if (finalUrl.includes("/booking/")) {
       pendingBooking = { page, formData, fillBookingForm, clickSubmitButton, restaurant, date, time, partySize, slotTime, searchUrl, submitted };
+      process.stderr.write(`[mcp] 最終結果: waitingForUserSubmit，頁面保持開啟\n`);
       return {
         success: false,
         waitingForUserSubmit: true,
@@ -954,9 +1393,11 @@ async function bookOpenTable(restaurant, date, time, partySize, name, phone, ema
       };
     }
 
+    process.stderr.write(`[mcp] 最終結果: 未知狀態，關閉頁面。URL=${page.url().slice(0, 100)}\n`);
     await page.close();
     return { success: false, slotSelected: slotTime, submitted, message: "已嘗試訂位，請確認瀏覽器中的結果", finalUrl, searchUrl };
   } catch (err) {
+    process.stderr.write(`[mcp] bookOpenTable 錯誤: ${err?.message || err}\n`);
     return {
       success: false,
       error: String(err?.message || err),
@@ -972,23 +1413,38 @@ async function bookOpenTable(restaurant, date, time, partySize, name, phone, ema
 async function fillDetailsInAuthIframe(pg, formData) {
   // Retry loop — the details form may take a moment to appear after code verification
   for (let attempt = 0; attempt < 6; attempt++) {
-    const authFrame = pg.frames().find(f => f.url().includes('/authenticate/'));
-    if (!authFrame) {
+    const found = await findAuthFrame(pg);
+    if (!found) {
       process.stderr.write(`[mcp] fillDetails: 找不到 auth iframe (attempt ${attempt})\n`);
       await pg.waitForTimeout(2000);
       continue;
     }
 
-    const formInfo = await authFrame.evaluate(() => {
-      const text = (document.body?.innerText || '');
-      const inputs = [...document.querySelectorAll('input')].filter(i => i.offsetParent !== null);
-      return {
+    const authFrame = found.frame;
+    const isLocator = found.type === 'frameLocator';
+
+    let formInfo;
+    if (isLocator) {
+      const text = await authFrame.locator('body').innerText().catch(() => '');
+      const inputCount = await authFrame.locator('input:visible').count().catch(() => 0);
+      formInfo = {
         text: text.slice(0, 500),
         hasDetails: text.includes('最後一步') || text.includes('確認你的詳細資料') ||
                     text.includes('名字') || text.includes('First name') || text.includes('Confirm your details'),
-        inputPlaceholders: inputs.map(i => i.placeholder || i.id || ''),
+        inputPlaceholders: [],
       };
-    }).catch(() => ({ text: '', hasDetails: false, inputPlaceholders: [] }));
+    } else {
+      formInfo = await authFrame.evaluate(() => {
+        const text = (document.body?.innerText || '');
+        const inputs = [...document.querySelectorAll('input')].filter(i => i.offsetParent !== null);
+        return {
+          text: text.slice(0, 500),
+          hasDetails: text.includes('最後一步') || text.includes('確認你的詳細資料') ||
+                      text.includes('名字') || text.includes('First name') || text.includes('Confirm your details'),
+          inputPlaceholders: inputs.map(i => i.placeholder || i.id || ''),
+        };
+      }).catch(() => ({ text: '', hasDetails: false, inputPlaceholders: [] }));
+    }
 
     process.stderr.write(`[mcp] fillDetails(${attempt}): hasDetails=${formInfo.hasDetails} inputs=${JSON.stringify(formInfo.inputPlaceholders)}\n`);
 
@@ -999,23 +1455,36 @@ async function fillDetailsInAuthIframe(pg, formData) {
 
     process.stderr.write(`[mcp] 偵測到詳細資料表單，用 Playwright fill() 填寫...\n`);
 
-    // Use Playwright's frame-level API to fill — more reliable with React
-    const inputs = await authFrame.$$('input');
     const filled = {};
-    for (const inp of inputs) {
-      if (!(await inp.isVisible().catch(() => false))) continue;
-      const ph = (await inp.getAttribute('placeholder').catch(() => '') || '').toLowerCase();
-      const id = (await inp.getAttribute('id').catch(() => '') || '').toLowerCase();
 
-      if (ph.includes('名字') || id.includes('firstname') || id.includes('first_name')) {
-        await inp.fill(formData.firstName || '');
-        filled.firstName = true;
-      } else if (ph.includes('姓氏') || ph.includes('姓') || id.includes('lastname') || id.includes('last_name')) {
-        await inp.fill(formData.lastName || '');
-        filled.lastName = true;
-      } else if (ph.includes('郵件') || ph.includes('email') || id.includes('email')) {
-        await inp.fill(formData.email || '');
-        filled.email = true;
+    if (isLocator) {
+      // frameLocator mode — use locator API
+      const firstNameInput = authFrame.locator('input[id*="firstName" i], input[id*="first_name" i], input[placeholder*="名字" i]');
+      if (await firstNameInput.count() > 0) { await firstNameInput.first().fill(formData.firstName || ''); filled.firstName = true; }
+
+      const lastNameInput = authFrame.locator('input[id*="lastName" i], input[id*="last_name" i], input[placeholder*="姓" i]');
+      if (await lastNameInput.count() > 0) { await lastNameInput.first().fill(formData.lastName || ''); filled.lastName = true; }
+
+      const emailInput = authFrame.locator('input[id*="email" i], input[type="email"], input[placeholder*="郵件" i]');
+      if (await emailInput.count() > 0) { await emailInput.first().fill(formData.email || ''); filled.email = true; }
+    } else {
+      // frame mode — use $$ API
+      const inputs = await authFrame.$$('input');
+      for (const inp of inputs) {
+        if (!(await inp.isVisible().catch(() => false))) continue;
+        const ph = (await inp.getAttribute('placeholder').catch(() => '') || '').toLowerCase();
+        const id = (await inp.getAttribute('id').catch(() => '') || '').toLowerCase();
+
+        if (ph.includes('名字') || id.includes('firstname') || id.includes('first_name')) {
+          await inp.fill(formData.firstName || '');
+          filled.firstName = true;
+        } else if (ph.includes('姓氏') || ph.includes('姓') || id.includes('lastname') || id.includes('last_name')) {
+          await inp.fill(formData.lastName || '');
+          filled.lastName = true;
+        } else if (ph.includes('郵件') || ph.includes('email') || id.includes('email')) {
+          await inp.fill(formData.email || '');
+          filled.email = true;
+        }
       }
     }
 
@@ -1023,14 +1492,23 @@ async function fillDetailsInAuthIframe(pg, formData) {
 
     // Click 完成訂位 button in iframe
     await pg.waitForTimeout(800);
-    const btns = await authFrame.$$('button');
-    for (const b of btns) {
-      if (!(await b.isVisible().catch(() => false))) continue;
-      const text = await b.textContent().catch(() => '');
-      if (text.includes('完成訂位') || text.includes('Complete') || text.includes('confirm')) {
-        await b.click({ timeout: 5000 }).catch(() => b.click({ force: true }));
-        process.stderr.write(`[mcp] 已點擊 iframe 內「${text.trim()}\n`);
-        break;
+
+    if (isLocator) {
+      const btn = authFrame.locator('button:has-text("完成訂位"), button:has-text("Complete"), button:has-text("confirm")');
+      if (await btn.count() > 0) {
+        await btn.first().click({ timeout: 5000 }).catch(async () => { await btn.first().click({ force: true }); });
+        process.stderr.write(`[mcp] 已點擊 iframe 內完成按鈕 (frameLocator)\n`);
+      }
+    } else {
+      const btns = await authFrame.$$('button');
+      for (const b of btns) {
+        if (!(await b.isVisible().catch(() => false))) continue;
+        const text = await b.textContent().catch(() => '');
+        if (text.includes('完成訂位') || text.includes('Complete') || text.includes('confirm')) {
+          await b.click({ timeout: 5000 }).catch(() => b.click({ force: true }));
+          process.stderr.write(`[mcp] 已點擊 iframe 內「${text.trim()}\n`);
+          break;
+        }
       }
     }
 
@@ -1061,7 +1539,9 @@ async function completeBookingAfterVerification(code) {
     // If a verification code was provided, enter it in the auth iframe
     if (code) {
       process.stderr.write(`[mcp] 輸入驗證碼: ${code}\n`);
-      const authFrame = page.frames().find(f => f.url().includes('/authenticate/'));
+      const found = await findAuthFrame(page);
+      const authFrame = found?.frame;
+      const isLocator = found?.type === 'frameLocator';
       if (authFrame) {
         // Find code input — try multiple selectors
         let codeFilled = false;
@@ -1071,58 +1551,83 @@ async function completeBookingAfterVerification(code) {
           'input[id*="otp" i]', 'input[id*="pin" i]',
           'input[data-test*="verification" i]',
         ];
-        for (const sel of codeSelectors) {
-          const inp = await authFrame.$(sel);
-          if (inp && await inp.isVisible().catch(() => false)) {
-            await inp.fill(code);
-            codeFilled = true;
-            process.stderr.write(`[mcp] 已填入驗證碼 (${sel})\n`);
-            break;
+
+        if (isLocator) {
+          // frameLocator mode
+          for (const sel of codeSelectors) {
+            const inp = authFrame.locator(sel);
+            if (await inp.count() > 0 && await inp.first().isVisible().catch(() => false)) {
+              await inp.first().fill(code);
+              codeFilled = true;
+              process.stderr.write(`[mcp] 已填入驗證碼 (frameLocator: ${sel})\n`);
+              break;
+            }
           }
-        }
-        if (!codeFilled) {
-          // Fallback: any visible input that isn't phone/recaptcha
-          const allInputs = await authFrame.$$('input');
-          for (const inp of allInputs) {
-            const id = await inp.getAttribute('id').catch(() => '');
-            if (id === 'phoneNumber' || id === 'phoneNumberCountryCode' || id?.startsWith('g-recaptcha')) continue;
-            const type = await inp.getAttribute('type').catch(() => '');
-            if (type === 'hidden' || type === 'checkbox' || type === 'select-one') continue;
-            if (await inp.isVisible().catch(() => false)) {
+        } else {
+          // frame mode
+          for (const sel of codeSelectors) {
+            const inp = await authFrame.$(sel);
+            if (inp && await inp.isVisible().catch(() => false)) {
               await inp.fill(code);
               codeFilled = true;
-              process.stderr.write(`[mcp] 已填入驗證碼 (fallback: id=${id})\n`);
+              process.stderr.write(`[mcp] 已填入驗證碼 (${sel})\n`);
               break;
+            }
+          }
+          if (!codeFilled) {
+            // Fallback: any visible input that isn't phone/recaptcha
+            const allInputs = await authFrame.$$('input');
+            for (const inp of allInputs) {
+              const id = await inp.getAttribute('id').catch(() => '');
+              if (id === 'phoneNumber' || id === 'phoneNumberCountryCode' || id?.startsWith('g-recaptcha')) continue;
+              const type = await inp.getAttribute('type').catch(() => '');
+              if (type === 'hidden' || type === 'checkbox' || type === 'select-one') continue;
+              if (await inp.isVisible().catch(() => false)) {
+                await inp.fill(code);
+                codeFilled = true;
+                process.stderr.write(`[mcp] 已填入驗證碼 (fallback: id=${id})\n`);
+                break;
+              }
             }
           }
         }
 
         if (codeFilled) {
           // Click verify/continue button
-          const btns = await authFrame.$$('button');
-          for (const b of btns) {
-            if (!(await b.isVisible().catch(() => false))) continue;
-            const text = await b.textContent().catch(() => '');
-            if (text.includes('驗證') || text.includes('確認') || text.includes('繼續') ||
-                text.includes('verify') || text.includes('Verify') || text.includes('Continue')) {
-              await b.click({ timeout: 5000 }).catch(() => b.click({ force: true }));
-              process.stderr.write(`[mcp] 已點擊: ${text.trim()}\n`);
-              break;
+          if (isLocator) {
+            const btn = authFrame.locator('button:has-text("驗證"), button:has-text("確認"), button:has-text("繼續"), button:has-text("verify"), button:has-text("Continue")');
+            if (await btn.count() > 0) {
+              await btn.first().click({ timeout: 5000 }).catch(async () => { await btn.first().click({ force: true }); });
+              process.stderr.write(`[mcp] 已點擊驗證按鈕 (frameLocator)\n`);
+            }
+          } else {
+            const btns = await authFrame.$$('button');
+            for (const b of btns) {
+              if (!(await b.isVisible().catch(() => false))) continue;
+              const text = await b.textContent().catch(() => '');
+              if (text.includes('驗證') || text.includes('確認') || text.includes('繼續') ||
+                  text.includes('verify') || text.includes('Verify') || text.includes('Continue')) {
+                await b.click({ timeout: 5000 }).catch(() => b.click({ force: true }));
+                process.stderr.write(`[mcp] 已點擊: ${text.trim()}\n`);
+                break;
+              }
             }
           }
           await page.waitForTimeout(8000);
 
           // After verification code accepted, check for "確認你的詳細資料" form
-          // This form asks for firstName, lastName, email after phone is verified
-          await fillDetailsInAuthIframe(page, formData);
+          process.stderr.write(`[mcp] 驗證碼送出後等待 8s，現在檢查 details form...\n`);
+          const detailsResult = await fillDetailsInAuthIframe(page, formData);
+          process.stderr.write(`[mcp] fillDetailsInAuthIframe 結果: ${detailsResult}\n`);
         } else {
           process.stderr.write(`[mcp] 找不到驗證碼輸入欄位\n`);
-          // Dump iframe state for debugging
-          const dbg = await authFrame.evaluate(() => {
-            const inputs = [...document.querySelectorAll('input')].map(i => ({ id: i.id, type: i.type, visible: i.offsetParent !== null }));
-            return { inputs, text: (document.body?.innerText || '').slice(0, 500) };
-          }).catch(() => ({}));
-          process.stderr.write(`[mcp] iframe 狀態: ${JSON.stringify(dbg)}\n`);
+          if (!isLocator) {
+            const dbg = await authFrame.evaluate(() => {
+              const inputs = [...document.querySelectorAll('input')].map(i => ({ id: i.id, type: i.type, visible: i.offsetParent !== null }));
+              return { inputs, text: (document.body?.innerText || '').slice(0, 500) };
+            }).catch(() => ({}));
+            process.stderr.write(`[mcp] iframe 狀態: ${JSON.stringify(dbg)}\n`);
+          }
         }
       } else {
         process.stderr.write(`[mcp] 找不到驗證 iframe\n`);
