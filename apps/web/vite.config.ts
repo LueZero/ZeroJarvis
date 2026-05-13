@@ -7,6 +7,23 @@ import basicSsl from "@vitejs/plugin-basic-ssl";
 
 const require = createRequire(import.meta.url);
 
+/** Suppress transient WebSocket proxy errors (ECONNRESET, ECONNREFUSED)
+ *  that occur when Gateway restarts or isn't ready yet. */
+function wsProxyQuiet(): Plugin {
+  return {
+    name: "vite-plugin-ws-proxy-quiet",
+    configureServer(server) {
+      // Suppress ECONNRESET on the HTTP server (covers upgrade/proxy pipe breaks)
+      server.httpServer?.on("clientError", (err: any, socket) => {
+        if (err?.code === "ECONNRESET") {
+          socket.destroy();
+          return;
+        }
+      });
+    },
+  };
+}
+
 /** Serve onnxruntime-web .mjs / .wasm files directly from node_modules so
  *  Vite's pre-bundler doesn't break their dynamic-import chain. */
 function onnxruntimePlugin(): Plugin {
@@ -40,7 +57,7 @@ function onnxruntimePlugin(): Plugin {
 }
 
 export default defineConfig({
-  plugins: [sveltekit(), onnxruntimePlugin(), basicSsl()],
+  plugins: [sveltekit(), onnxruntimePlugin(), wsProxyQuiet(), basicSsl()],
   optimizeDeps: {
     include: ["onnxruntime-web", "@ricky0123/vad-web"],
   },
@@ -49,6 +66,19 @@ export default defineConfig({
       "/ws": {
         target: "ws://localhost:3100",
         ws: true,
+        configure: (proxy) => {
+          // Intercept proxy-level errors to suppress transient ECONNRESET/ECONNREFUSED
+          const origEmit = proxy.emit.bind(proxy);
+          proxy.emit = function (event: string, ...args: unknown[]) {
+            if (event === "error") {
+              const err = args[0] as NodeJS.ErrnoException | undefined;
+              if (err?.code === "ECONNRESET" || err?.code === "ECONNREFUSED") {
+                return false;
+              }
+            }
+            return origEmit(event, ...args);
+          } as typeof proxy.emit;
+        },
       },
       "/api": {
         target: "http://localhost:3100",

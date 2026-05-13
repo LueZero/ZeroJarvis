@@ -225,8 +225,8 @@ JSON payload（如 NOTEBOOK）使用 brace-counting 解析，不受巢狀 `]` �
   → 時間到 → Worker 建立獨立 OpenCode session → 執行任務
   → 完成 → TTS 語音播報結果
 
-使用者: "幫我比較三間日式餐廳"
-  → AI 判斷為長任務 → 回覆 + [ASYNC_TASK:搜尋並比較三間日式餐廳]
+使用者: "幫我在背後比較三間日式餐廳"
+  → AI 語意命中「背後」→ 回覆 + [ASYNC_TASK:搜尋並比較三間日式餐廳]
   → Gateway 立即派發 Worker → 前台不卡住
   → 完成後語音通知使用者
 ```
@@ -234,7 +234,7 @@ JSON payload（如 NOTEBOOK）使用 brace-counting 解析，不受巢狀 `]` �
 **三種任務標記：**
 | 標記 | 格式 | 觸發時機 |
 |------|------|----------|
-| `[ASYNC_TASK:描述]` | 即時背景任務 | 耗時操作（搜尋比較、訂位、多步驟工具鏈） |
+| `[ASYNC_TASK:描述]` | 即時背景任務 | 使用者語意明確要求背景處理（「背後幫我」「查完再跟我說」「不急」等） |
 | `[SCHEDULE:ISO時間:描述]` | 定時排程 | 「X 分鐘後」「明天早上」等時間指令 |
 | `[SCHEDULE_REPEAT:頻率:HH:mm:描述]` | 重複排程 | 「每秒」「每分鐘」「每天」等週期指令（頻率：`Ns`/`Nm`/`Nh`/`daily`/`weekly`/`monthly`/`yearly`） |
 
