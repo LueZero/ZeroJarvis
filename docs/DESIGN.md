@@ -78,15 +78,15 @@ JSON payload（如 NOTEBOOK）使用 brace-counting 解析，不受巢狀 `]` �
   → 前端彈出全螢幕 Google Maps iframe
   → 科幻 HUD 風格（掃描線、四角框、資料條）
 ```
-- 由 Skill 驅動（`.opencode/skills/food-map/SKILL.md`）
-- 不限美食：景點、加油站、飯店、便利商店等皆可觸發
+- 由 Skill 驅動（`.opencode/skills/onetable-food/SKILL.md`）
+- 專注美食/餐廳推薦，透過 OpenTable 搜尋確保可訂位
 - 語音說「關閉地圖」→ `[ACTION:MAP_CLOSE]`
 
 ### F6：工具擴充（CLI + bash + MCP）
 - 透過 OpenCode 的 `bash` 工具直接呼叫外部 CLI
 - 透過 OpenCode 的 MCP Server 連接專用自動化服務
 - AI 自主判斷何時呼叫工具
-- 目前已整合：`notebooklm-py`（Google NotebookLM CLI）、`food-search`（OpenTable MCP Server）
+- 目前已整合：`notebooklm-py`（Google NotebookLM CLI）、`onetable-food`（OpenTable MCP Server）
 
 ### F7：螢幕截圖分析（Screen Capture）
 ```
@@ -104,7 +104,7 @@ JSON payload（如 NOTEBOOK）使用 brace-counting 解析，不受巢狀 `]` �
 ### F8：餐廳訂位（OpenTable 自動化）
 ```
 使用者: "幫我訂湯棧中山店，兩位，今晚七點"
-  → AI 載入 food-map skill
+  → AI 載入 onetable-food skill
   → MCP: search_opentable("湯棧 中山", partySize=2, date=今天, time=19:00)
   → CDP 連接真實 Chrome → 開 OpenTable 頁面 → 擷取可訂位時段
   → AI 選擇最佳時段 → book_opentable(slotIndex)
@@ -113,18 +113,18 @@ JSON payload（如 NOTEBOOK）使用 brace-counting 解析，不受巢狀 `]` �
   → 使用者: "499883" → complete_booking(code="499883")
   → 自動填入驗證碼 → 填寫詳細資料 → 完成訂位
 ```
-- **MCP Server**（`services/gateway/src/food/mcp-server.cjs`）— JSON-RPC 2.0 over stdio
+- **MCP Server**（`services/gateway/src/onetable-food/mcp-server.cjs`）— JSON-RPC 2.0 over stdio
 - **Playwright CDP** 連接真實 Chrome（`--remote-debugging-port=9234`）
 - 保留使用者登入狀態（`--user-data-dir` 持久化 profile）
 - **Auth iframe 處理**：自動偵測 `#authenticationModalIframe` → 選國碼 → 填電話 → 驗證碼 → 詳細資料
 - **Overlay 清除**：`dismissOverlays()` 處理 cookie consent、privacy banner、ReactModal
 - 訂位人資訊存放在 `config/booking.json`
-- 由 Skill 驅動（`.opencode/skills/food-map/SKILL.md`）
+- 由 Skill 驅動（`.opencode/skills/onetable-food/SKILL.md`）
 
 **MCP 工具清單：**
 | 工具 | 功能 |
 |------|------|
-| `search_restaurants` | Google Maps 搜尋餐廳評分、營業狀態 |
+| `search_restaurants` | OpenTable 搜尋推薦餐廳、評分、可訂位時段 |
 | `search_opentable` | OpenTable 查詢可訂位時段（CDP 自動化） |
 | `book_opentable` | 選時段 → 填表 → 提交 → 處理 auth iframe |
 | `complete_booking` | 填入簡訊驗證碼 + 詳細資料 → 完成訂位 |
@@ -447,7 +447,7 @@ Worker 啟動 → buildWorkerPrompt()
 │  └────────────────┘ └────────────┘ └───────────────────┘  │
 │                         │                                  │
 │                    ┌────▼──────────────────────────────┐   │
-│                    │  MCP: food-search (stdio)         │   │
+│                    │  MCP: onetable-food (stdio)      │   │
 │                    │  Playwright CDP → Chrome :9234    │   │
 │                    │  (OpenTable 自動訂位)              │   │
 │                    └───────────────────────────────────┘   │
@@ -834,7 +834,7 @@ zerojarvis/
 │           │   └── worker.ts        # OpenCode worker session 執行（含記憶注入）
 │           ├── ws/
 │           │   └── handler.ts       # WebSocket 訊息路由
-│           └── food/
+│           └── onetable-food/
 │               └── mcp-server.cjs   # OpenTable MCP Server (CDP)
 ├── config/
 │   ├── booking.json                 # 訂位人資訊（姓名/電話/email）
@@ -910,7 +910,7 @@ Skills 是 Markdown 文件，定義 AI 在特定情境下的行為規則。
 ```
 .opencode/skills/              ← 自訂技能（ZeroJarvis 專屬）
 ├── hardware-control/SKILL.md  # 攝像頭控制 (CAMERA_ON/OFF/CAPTURE)
-├── food-map/SKILL.md          # 地圖導航 + 餐廳訂位 (MAP/MAP_CLOSE + MCP 訂位)
+├── onetable-food/SKILL.md     # OpenTable 餐廳推薦 + 訂位 (MAP/MAP_CLOSE + MCP 訂位)
 ├── screenshot/SKILL.md        # 螢幕截圖 (SCREENSHOT)
 ├── session/SKILL.md           # 多會話管理 (NEW_SESSION/SESSION_PREV/NEXT)
 ├── listen-control/SKILL.md   # 聆聽控制 (LISTEN_PAUSE/LISTEN_RESUME)

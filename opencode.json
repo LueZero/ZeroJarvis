@@ -11,9 +11,9 @@
     "websearch": "allow"
   },
   "mcp": {
-    "food-search": {
+    "onetable-food": {
       "type": "local",
-      "command": ["node", "D:/ZeroJarvis/services/gateway/src/food/mcp-server.cjs"],
+      "command": ["node", "D:/ZeroJarvis/services/gateway/src/onetable-food/mcp-server.cjs"],
       "enabled": true
     }
   },

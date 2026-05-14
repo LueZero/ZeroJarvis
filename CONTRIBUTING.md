@@ -81,7 +81,7 @@ description: 描述此技能的觸發時機與行為
 
 ### 4. 新增 MCP Server（外部工具整合）
 
-參考 `services/gateway/src/food/mcp-server.cjs`，建立新的 MCP Server 並在 `opencode.json` 中註冊。
+參考 `services/gateway/src/onetable-food/mcp-server.cjs`，建立新的 MCP Server 並在 `opencode.json` 中註冊。
 
 ## 程式碼風格
 

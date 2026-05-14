@@ -1,12 +1,14 @@
 ---
-name: food-map
-description: 當使用者詢問地點、餐廳、景點時彈出 Google Maps 地圖覆蓋層，餐廳查詢透過 MCP 工具搜尋評分資訊
+name: onetable-food
+description: 當使用者詢問餐廳、美食推薦、想吃東西時，透過 OpenTable 搜尋推薦餐廳再結合 Google Maps 地圖顯示位置，支援自動訂位
 ---
 
-# 地圖技能
+# OpenTable 美食技能
 
-當使用者詢問任何地點、場所、推薦時，你可以在介紹完成後觸發地圖顯示。
-適用範圍包括但不限於：美食餐廳、景點、醫院、加油站、超商、咖啡廳、健身房、飯店、公園等任何可在地圖上搜尋的場所。
+當使用者詢問美食、餐廳推薦、想吃東西時，透過 OpenTable 搜尋可訂位的餐廳，並用 Google Maps 顯示位置。
+適用範圍：餐廳、美食、小吃、咖啡廳、酒吧等與「吃」相關的場所。
+
+**注意：此技能僅處理美食/餐廳相關需求。景點、加油站、醫院、超商等非餐飲場所不在此技能範圍內。**
 
 ## 可用指令
 
@@ -15,20 +17,22 @@ description: 當使用者詢問地點、餐廳、景點時彈出 Google Maps 地
 | [ACTION:MAP:搜尋詞] | 在前端彈出 Google Maps |
 | [ACTION:MAP_CLOSE] | 關閉地圖畫面 |
 
-## MCP 工具：food-search
+## MCP 工具：onetable-food
 
-當使用者找餐廳、美食推薦、想吃東西時，**先呼叫 `food-search` 的 `search_restaurants` 工具**，取得評分、料理類型、營業狀態等資料。
+當使用者找餐廳、美食推薦、想吃東西時，**先呼叫 `onetable-food` 的 `search_restaurants` 工具**，從 OpenTable 取得推薦餐廳、評分、可訂位時段等資料。
 
 流程：
-1. 呼叫 `search_restaurants` 工具（搜尋詞包含地點 + 類型）
+1. 呼叫 `search_restaurants` 工具（搜尋詞包含地點 + 類型，可帶日期/時間/人數）
 2. 根據回傳資料，用 1-2 句簡短口語介紹（提及推薦的店名和評分）
-3. 結尾附上 `[ACTION:MAP:搜尋詞]` 開啟地圖
+3. 結尾附上 `[ACTION:MAP:搜尋詞]` 開啟 Google Maps 顯示位置
 
 系統會自動將工具回傳的餐廳資料顯示在地圖旁邊的面板上，你不需要額外處理。
 
+**優勢**：從 OpenTable 搜尋確保推薦的餐廳都可以直接訂位，不會推薦到無法訂位的店家。
+
 ## MCP 工具：search_opentable（查詢訂位時段）
 
-當使用者想**訂位、預約餐廳**時，先呼叫 `food-search` 的 `search_opentable` 工具查詢可用時段。
+當使用者想**訂位、預約餐廳**時，先呼叫 `onetable-food` 的 `search_opentable` 工具查詢可用時段。
 
 參數：
 - `restaurant`（必填）：餐廳名稱
@@ -40,7 +44,7 @@ description: 當使用者詢問地點、餐廳、景點時彈出 Google Maps 地
 
 ## MCP 工具：book_opentable（自動完成訂位）
 
-查到可用時段後，若使用者確認要訂，呼叫 `food-search` 的 `book_opentable` 工具自動完成訂位。
+查到可用時段後，若使用者確認要訂，呼叫 `onetable-food` 的 `book_opentable` 工具自動完成訂位。
 
 參數：
 - `restaurant`（必填）：餐廳名稱
@@ -74,7 +78,7 @@ description: 當使用者詢問地點、餐廳、景點時彈出 Google Maps 地
 ## 輸出規則
 
 - 標記放在回覆文字末尾（介紹完畢後）
-- 搜尋詞要精確：地點 + 類型（例如「高雄左營日式拉麵」「台北101附近停車場」）
+- 搜尋詞要精確：地點 + 餐廳類型（例如「高雄左營日式拉麵」「台北大安區義大利餐廳」）
 - 如果使用者有提到地點，搜尋詞必須包含該地點
 - 如果使用者沒提地點，搜尋詞用「附近」+ 類型
 - 格式嚴格為 `[ACTION:MAP:搜尋內容]`
@@ -82,12 +86,11 @@ description: 當使用者詢問地點、餐廳、景點時彈出 Google Maps 地
 
 ## 何時觸發
 
-- 使用者問「附近有什麼好吃的」「推薦餐廳」→ 呼叫 search_restaurants + 介紹 + MAP
-- 使用者問「哪裡有XXX餐廳」「晚餐吃什麼」→ 呼叫 search_restaurants + 介紹 + MAP
-- 使用者問景點、旅遊、住宿推薦 → 介紹 + MAP（不需 MCP 工具）
-- 使用者問生活需求（藥局、加油站、超市等）→ MAP（不需 MCP 工具）
+- 使用者問「附近有什麼好吃的」「推薦餐廳」→ 呼叫 search_restaurants（OpenTable）+ 介紹 + MAP
+- 使用者問「哪裡有XXX餐廳」「晚餐吃什麼」→ 呼叫 search_restaurants（OpenTable）+ 介紹 + MAP
 - 使用者要「訂位」「預約」「book」某餐廳 → 先呼叫 search_opentable，確認後呼叫 book_opentable
-- 使用者只是閒聊但沒有要找地點 → 不觸發
+- 使用者問的是景點、加油站、醫院等非餐飲場所 → **不觸發此技能**
+- 使用者只是閒聊但沒有要找餐廳 → 不觸發
 
 ## 回覆風格
 
@@ -105,12 +108,6 @@ description: 當使用者詢問地點、餐廳、景點時彈出 Google Maps 地
 使用者：「高雄有推薦的火鍋店嗎？」
 → （先呼叫 search_restaurants 工具）
 → 高雄有不少評價好的火鍋店，鼎王4.3分和肉多多4.5分都蠻受歡迎。[ACTION:MAP:高雄火鍋推薦]
-
-使用者：「台北有什麼必去的景點？」
-→ 台北幾個經典景點像101、故宮、象山都很推薦。[ACTION:MAP:台北必去景點]
-
-使用者：「附近有沒有加油站？」
-→ 幫您查看附近的加油站。[ACTION:MAP:附近加油站]
 
 使用者：「推薦一下台南老街小吃」
 → （先呼叫 search_restaurants 工具）

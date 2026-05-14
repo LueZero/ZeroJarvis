@@ -79,7 +79,7 @@
 │   LLM (Claude) │ bash/CLI │ MCP │ Skills │ Vision           │
 │                        │                                    │
 │                  ┌─────▼─────────────────┐                  │
-│                  │  MCP: food-search      │                 │
+│                  │  MCP: onetable-food    │                 │
 │                  │  Playwright CDP → Chrome│                │
 │                  └───────────────────────┘                  │
 └─────────────────────────────────────────────────────────────┘
@@ -172,7 +172,7 @@ ZeroJarvis/
 ├── services/
 │   └── gateway/               # Bun WebSocket 語音閘道           :3100
 │       └── src/
-│           ├── food/          # OpenTable MCP Server (CDP)
+│           ├── onetable-food/  # OpenTable MCP Server (CDP)
 │           └── task/          # 背景任務 + 記憶系統
 │               └── memory.ts  #   持久記憶 (files/memory/)
 ├── packages/
@@ -183,7 +183,7 @@ ZeroJarvis/
 │   │   └── vision.md          #   Vision 子 Agent
 │   └── skills/                # 自訂技能（ZeroJarvis 專屬）
 │       ├── hardware-control/  #   攝像頭控制
-│       ├── food-map/          #   地圖導航 + 餐廳訂位
+│       ├── onetable-food/     #   OpenTable 餐廳推薦 + 訂位
 │       ├── screenshot/        #   螢幕截圖
 │       ├── session/           #   多會話管理
 │       ├── listen-control/    #   聆聽控制
@@ -269,7 +269,7 @@ Skills 是 SKILL.md 文件，定義 AI 在特定情境下的行為。OpenCode �
 ```
 .opencode/skills/              ← 自訂技能（專案專屬）
 ├── hardware-control/          # 攝像頭控制
-├── food-map/                  # 地圖 + 餐廳訂位 (MCP)
+├── onetable-food/             # OpenTable 餐廳推薦 + 訂位 (MCP)
 ├── screenshot/                # 螢幕截圖
 ├── session/                   # 多會話管理
 ├── listen-control/            # 聆聽控制
@@ -307,7 +307,7 @@ npx skills update      # 更新全部
 | **STT** | Groq Whisper API | 快速中文語音辨識 |
 | **TTS** | edge-tts | 免費、低延遲語音合成 |
 | **LLM** | OpenCode + Claude Sonnet | Agent Loop + 工具呼叫 |
-| **MCP** | food-search (Playwright CDP) | 餐廳搜尋 + 自動訂位 |
+| **MCP** | onetable-food (Playwright CDP) | OpenTable 餐廳推薦 + 自動訂位 |
 | **Monorepo** | pnpm workspace | apps/ + services/ + packages/ |
 
 ## 開發

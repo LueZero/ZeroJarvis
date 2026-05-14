@@ -389,14 +389,14 @@ export function handleWebSocket() {
                   try {
                     const data = JSON.parse(output);
                     send(ws, { type: "food_results", data } as any);
-                    log("FOOD", `MCP tool returned ${data.restaurants?.length ?? 0} restaurants`);
+                    log("ONETABLE", `MCP tool returned ${data.restaurants?.length ?? 0} restaurants`);
                   } catch {}
                 }
                 if (toolName.includes("search_opentable")) {
                   try {
                     const data = JSON.parse(output);
                     send(ws, { type: "opentable_results", data } as any);
-                    log("OPENTABLE", `MCP tool returned ${data.results?.length ?? 0} restaurants, found=${data.found}`);
+                    log("ONETABLE", `MCP tool returned ${data.results?.length ?? 0} restaurants, found=${data.found}`);
                   } catch {}
                 }
               },
@@ -494,14 +494,14 @@ export function handleWebSocket() {
                   try {
                     const data = JSON.parse(output);
                     send(ws, { type: "food_results", data } as any);
-                    log("FOOD", `MCP tool returned ${data.restaurants?.length ?? 0} restaurants`);
+                    log("ONETABLE", `MCP tool returned ${data.restaurants?.length ?? 0} restaurants`);
                   } catch {}
                 }
                 if (toolName.includes("search_opentable")) {
                   try {
                     const data = JSON.parse(output);
                     send(ws, { type: "opentable_results", data } as any);
-                    log("OPENTABLE", `MCP tool returned ${data.results?.length ?? 0} restaurants, found=${data.found}`);
+                    log("ONETABLE", `MCP tool returned ${data.results?.length ?? 0} restaurants, found=${data.found}`);
                   } catch {}
                 }
               },
@@ -942,14 +942,14 @@ export async function processAudio(ws: ServerWebSocket<WSData>) {
           try {
             const data = JSON.parse(output);
             send(ws, { type: "food_results", data } as any);
-            log("FOOD", `MCP tool returned ${data.restaurants?.length ?? 0} restaurants`);
+            log("ONETABLE", `MCP tool returned ${data.restaurants?.length ?? 0} restaurants`);
           } catch {}
         }
         if (toolName.includes("search_opentable")) {
           try {
             const data = JSON.parse(output);
             send(ws, { type: "opentable_results", data } as any);
-            log("OPENTABLE", `MCP tool returned ${data.results?.length ?? 0} restaurants, found=${data.found}`);
+            log("ONETABLE", `MCP tool returned ${data.results?.length ?? 0} restaurants, found=${data.found}`);
           } catch {}
         }
       },

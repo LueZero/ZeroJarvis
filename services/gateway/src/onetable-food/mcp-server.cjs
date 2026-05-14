@@ -1,10 +1,10 @@
 /**
- * MCP server for restaurant search via Google Maps + OpenTable booking via Playwright.
+ * MCP server for restaurant search via OpenTable + Google Maps display + OpenTable booking.
  * Run by OpenCode as a local MCP server (Node.js, not Bun).
  *
  * Protocol: JSON-RPC 2.0 over stdio.
  * Supports both Content-Length framing and line-delimited JSON (OpenCode uses the latter).
- * Tools: search_restaurants, search_opentable, book_opentable
+ * Tools: search_restaurants (OpenTable), search_opentable, book_opentable, complete_booking
  */
 const { chromium } = require("playwright");
 const fs = require("fs");
@@ -73,7 +73,7 @@ async function handleMessage(msg) {
         result: {
           protocolVersion: "2025-11-25",
           capabilities: { tools: {} },
-          serverInfo: { name: "food-search", version: "1.0.0" },
+          serverInfo: { name: "onetable-food", version: "2.0.0" },
         },
       });
       break;
@@ -88,13 +88,25 @@ async function handleMessage(msg) {
           tools: [
             {
               name: "search_restaurants",
-              description: "在 Google Maps 搜尋餐廳，回傳名稱、評分、評論數、價位、菜系、地址、營業狀態等資訊",
+              description: "在 OpenTable 搜尋推薦餐廳，回傳名稱、評分、可訂位時段等資訊。搜尋詞可以是地區+菜系（如「台北大安區義大利餐廳」）或餐廳名稱",
               inputSchema: {
                 type: "object",
                 properties: {
                   query: {
                     type: "string",
-                    description: "搜尋關鍵字，例如「台北大安區義大利餐廳」",
+                    description: "搜尋關鍵字，例如「台北大安區義大利餐廳」「高雄日式料理」",
+                  },
+                  date: {
+                    type: "string",
+                    description: "日期 YYYY-MM-DD 格式，預設今天",
+                  },
+                  time: {
+                    type: "string",
+                    description: "時間 HH:MM 格式，例如 19:00，預設 19:00",
+                  },
+                  party_size: {
+                    type: "number",
+                    description: "用餐人數，預設 2",
                   },
                 },
                 required: ["query"],
@@ -178,7 +190,13 @@ async function handleMessage(msg) {
     case "tools/call": {
       const { name, arguments: args } = msg.params;
       if (name === "search_restaurants") {
-        const result = await searchRestaurants(args.query || "");
+        const today = new Date().toISOString().slice(0, 10);
+        const result = await searchRestaurants(
+          args.query || "",
+          args.date || today,
+          args.time || "19:00",
+          args.party_size || 2,
+        );
         send({
           jsonrpc: "2.0", id: msg.id,
           result: {
@@ -243,67 +261,116 @@ async function handleMessage(msg) {
   }
 }
 
-// ── Restaurant Search (Playwright + Google Maps) ──
+// ── Restaurant Search (OpenTable) ──
+// Uses CDP connection to real Chrome (same as search_opentable) to search OpenTable for restaurants.
 
-async function searchRestaurants(query) {
+async function searchRestaurants(query, date, time, partySize) {
   if (!query) {
     return { query: "", restaurants: [], searchedAt: new Date().toISOString() };
   }
 
+  const dateTime = `${date}T${time}:00`;
+  const searchUrl = `https://www.opentable.com.tw/s?term=${encodeURIComponent(query)}&dateTime=${encodeURIComponent(dateTime)}&covers=${partySize}`;
+
   let browser;
   try {
-    browser = await chromium.launch({
-      headless: true,
-      args: ["--disable-blink-features=AutomationControlled", "--no-sandbox", "--disable-gpu"],
-    });
+    browser = await launchRealChrome();
+    const context = browser.contexts()[0] || await browser.newContext();
+    const page = await context.newPage();
+    await page.goto(searchUrl, { timeout: 30000, waitUntil: "domcontentloaded" });
+    await page.waitForTimeout(6000);
 
-    const ctx = await browser.newContext({
-      userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-      locale: "zh-TW",
-      viewport: { width: 1280, height: 800 },
-    });
+    // Dismiss cookie/consent overlays
+    await dismissOverlays(page);
 
-    await ctx.addInitScript(() => {
-      Object.defineProperty(navigator, "webdriver", { get: () => false });
-    });
+    const restaurants = await page.evaluate(() => {
+      const results = [];
+      const allLinks = document.querySelectorAll('a[href*="/restaurant/profile"]');
+      const seen = new Set();
 
-    const page = await ctx.newPage();
-    await page.goto(
-      `https://www.google.com/maps/search/${encodeURIComponent(query)}`,
-      { timeout: 25000 }
-    );
-    await page.waitForSelector('a[href*="maps/place"]', { timeout: 10000 }).catch(() => {});
-    await page.waitForTimeout(2000);
+      for (const link of Array.from(allLinks).slice(0, 10)) {
+        const href = link.href || "";
+        if (seen.has(href)) continue;
+        seen.add(href);
 
-    const restaurants = await page.$$eval('a[href*="maps/place"]', (els) => {
-      return els.slice(0, 10).map((el) => {
-        const container = el.closest("div") || el;
-        const text = container?.textContent || "";
-        const name = el.getAttribute("aria-label") || "";
-        const ratingMatch = text.match(/(\d\.\d)/);
-        const reviewMatch = text.match(/\(([\d,]+)\)/);
-        const priceMatch = text.match(/(\${1,4})\s*·/);
-        const cuisineMatch = text.match(/\d\.\d\s*([^\d·$\(\)]{2,20})\s*·/);
-        const addressMatch = text.match(/·\s*([^·]{4,40}(?:路|街|大道|巷|號|段|樓|區|市|鎮|鄉|村|里|[\d\-]*[號]?))/);
-        const statusMatch = text.match(/(營業中|已打烊|即將打烊|24\s*小時營業)/);
-        return {
+        const card = link.closest('[class*="card" i], [class*="result" i], [class*="Restaurant" i], li, article, section') || link.parentElement?.parentElement?.parentElement;
+        const nameEl = card?.querySelector('h2, h3, [class*="name" i], [class*="Name"]') || link;
+        let name = (nameEl?.textContent || "").trim().split("\n")[0].trim();
+        if (!name || name.length < 2 || name.length > 60) continue;
+
+        // Extract rating
+        const cardText = card?.textContent || "";
+        const ratingMatch = cardText.match(/([\d.]+)\s*(?:分|\/5)/);
+        const rating = ratingMatch ? parseFloat(ratingMatch[1]) : 0;
+
+        // Extract review count
+        const reviewMatch = cardText.match(/\(([\d,]+)\s*(?:則評論|reviews?)\)/i);
+        const reviews = reviewMatch ? parseInt(reviewMatch[1].replace(/,/g, "")) : 0;
+
+        // Extract price range ($ symbols)
+        const priceMatch = cardText.match(/(\${1,4})\s/);
+        const priceRange = priceMatch ? priceMatch[1] : "";
+
+        // Extract cuisine type
+        const cuisineEl = card?.querySelector('[class*="cuisine" i], [class*="Cuisine" i]');
+        const cuisine = cuisineEl ? cuisineEl.textContent.trim() : "";
+
+        // Extract address
+        const addressEl = card?.querySelector('[class*="address" i], [class*="Address" i], [class*="location" i]');
+        const address = addressEl ? addressEl.textContent.trim() : "";
+
+        // Extract available time slots
+        const slotEls = card?.querySelectorAll('a[href*="/booking/details"], a[href*="availabilityToken"], button[class*="slot" i], button[class*="time" i], a[href*="avt="], [class*="TimeSlot"], [data-test*="slot"]') || [];
+        const slots = [];
+        for (const slot of slotEls) {
+          const t = (slot.textContent || "").trim();
+          const url = slot.tagName === "A" ? slot.href : (slot.closest("a")?.href || "");
+          if (t && t.match(/\d{1,2}:\d{2}/)) {
+            slots.push({ time: t, bookingUrl: url });
+          }
+        }
+
+        results.push({
           name,
-          rating: ratingMatch ? parseFloat(ratingMatch[1]) : 0,
-          reviews: reviewMatch ? parseInt(reviewMatch[1].replace(/,/g, "")) : 0,
-          priceRange: priceMatch ? priceMatch[1] : "",
-          cuisine: cuisineMatch ? cuisineMatch[1].trim() : "",
-          address: addressMatch ? addressMatch[1].trim() : "",
-          status: statusMatch ? statusMatch[1] : "",
-          mapsUrl: el.href || "",
-        };
-      }).filter((r) => r.name.length > 0);
+          rating,
+          reviews,
+          priceRange,
+          cuisine,
+          address,
+          status: slots.length > 0 ? "可訂位" : "",
+          mapsUrl: "",
+          pageUrl: href,
+          slots,
+        });
+      }
+
+      return results;
     });
 
-    return { query, restaurants, searchedAt: new Date().toISOString() };
-  } catch {
-    return { query, restaurants: [], searchedAt: new Date().toISOString() };
-  } finally {
-    if (browser) await browser.close();
+    const pageText = await page.evaluate(() => (document.body?.innerText || "").slice(0, 2000));
+    const noResults = pageText.includes("找不到") || pageText.includes("沒有結果") ||
+                      pageText.includes("No results") || pageText.includes("0 間餐廳") ||
+                      pageText.includes("Access Denied");
+
+    await page.close();
+
+    return {
+      query,
+      restaurants,
+      searchedAt: new Date().toISOString(),
+      searchUrl,
+      source: "opentable",
+      noResults: noResults && restaurants.length === 0,
+    };
+  } catch (err) {
+    return {
+      query,
+      restaurants: [],
+      searchedAt: new Date().toISOString(),
+      searchUrl,
+      source: "opentable",
+      error: String(err?.message || err),
+    };
   }
 }
 
