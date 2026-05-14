@@ -15,6 +15,15 @@
       "type": "local",
       "command": ["node", "D:/ZeroJarvis/services/gateway/src/onetable-food/mcp-server.cjs"],
       "enabled": true
+    },
+    "twinkle-hub": {
+      "type": "remote",
+      "url": "https://api.twinkleai.tw/mcp/",
+      "oauth": false,
+      "headers": {
+        "Authorization": "Bearer {env:TWINKLE_HUB_API_KEY}"
+      },
+      "enabled": true
     }
   },
   "tools": {
