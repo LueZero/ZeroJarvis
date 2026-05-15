@@ -170,6 +170,11 @@ $env:Path = "C:\Users\CIM\.local\bin;$env:Path"; notebooklm download quiz files/
 - `notebooklm download quiz files/notebooklm/quiz.json --latest`（quiz 不支援 --latest）
 - `notebooklm download flashcards flashcards.json`（缺少 `files/notebooklm/` 前綴）
 
+> ⚠️ **LaTeX 清理（quiz / flashcards JSON 必做）**：NotebookLM 產生的 JSON 內含 LaTeX 標記（`$...$`、`\frac{}{}`、`\Omega` 等），下載後必須立即執行清理：
+> ```powershell
+> $f = "files/notebooklm/<filename>.json"; $c = [IO.File]::ReadAllText($f, [Text.Encoding]::UTF8); $c = $c -replace '\\frac\{([^}]+)\}\{([^}]+)\}','$1/$2' -replace '\\eta','η' -replace '\\rho','ρ' -replace '\\ell','ℓ' -replace '\\Omega','Ω' -replace '\\%','%' -replace '\$',''; [IO.File]::WriteAllText($f, $c, [Text.Encoding]::UTF8)
+> ```
+
 ### Note（筆記）
 
 | 命令 | 說明 |

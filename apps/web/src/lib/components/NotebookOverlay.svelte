@@ -26,6 +26,19 @@
 
   type QuizQuestion = { question: string; options: string[]; correct: number; rationale?: string };
 
+  /** Strip LaTeX markup from NotebookLM content: $...$ delimiters, \frac{a}{b}, \Omega, etc. */
+  function stripLatex(s: string): string {
+    if (!s) return s;
+    return s
+      .replace(/\\frac\{([^}]+)\}\{([^}]+)\}/g, "$1/$2")
+      .replace(/\\eta/g, "η")
+      .replace(/\\rho/g, "ρ")
+      .replace(/\\ell/g, "ℓ")
+      .replace(/\\Omega/g, "Ω")
+      .replace(/\\%/g, "%")
+      .replace(/\$/g, "");
+  }
+
   function quizQuestions(): QuizQuestion[] | null {
     if (content.type !== "quiz") return null;
     const raw = parseJson(content.data);
@@ -37,18 +50,25 @@
 
     return arr.map((q: any) => {
       // Already in overlay format: {question, options: string[], correct: number}
-      if (Array.isArray(q.options) && typeof q.correct === "number") return q;
+      if (Array.isArray(q.options) && typeof q.correct === "number") {
+        return {
+          ...q,
+          question: stripLatex(q.question),
+          options: q.options.map((o: string) => stripLatex(o)),
+          rationale: q.rationale ? stripLatex(q.rationale) : q.rationale,
+        };
+      }
 
       // NotebookLM format: {question, answerOptions: [{text, isCorrect, rationale}]}
       if (Array.isArray(q.answerOptions)) {
-        const options = q.answerOptions.map((o: any) => o.text ?? o);
+        const options = q.answerOptions.map((o: any) => stripLatex(o.text ?? o));
         const correctIdx = q.answerOptions.findIndex((o: any) => o.isCorrect);
         const correctOpt = q.answerOptions.find((o: any) => o.isCorrect);
         return {
-          question: q.question,
+          question: stripLatex(q.question),
           options,
           correct: correctIdx >= 0 ? correctIdx : 0,
-          rationale: correctOpt?.rationale ?? q.hint ?? q.rationale,
+          rationale: stripLatex(correctOpt?.rationale ?? q.hint ?? q.rationale),
         };
       }
 
