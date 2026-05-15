@@ -15,7 +15,9 @@
   --success: #55ff99;
   --warning: #ffbb55;
   --radius: 12px;
-  --font: "Inter", "Noto Sans TC", system-ui, sans-serif;
+  --font: "Chakra Petch", "Noto Sans TC", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", "Noto Sans TC", ui-monospace, monospace;
+  --font-display: "Chakra Petch", "Noto Sans TC", system-ui, sans-serif;
 }
 
 * {

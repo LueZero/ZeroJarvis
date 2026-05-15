@@ -12,6 +12,7 @@
   import TaskPanel from "./TaskPanel.svelte";
   import SummaryPanel from "./SummaryPanel.svelte";
   import SideHUD from "./SideHUD.svelte";
+  import TaskPopups from "./TaskPopups.svelte";
   import {
     getState,
     setState,
@@ -152,7 +153,18 @@
       setState("idle");
     } catch (err: any) {
       console.warn("Auto-start failed, waiting for user gesture:", err?.message);
-      // Will be started manually via button
+      // Surface friendly error so user knows why the mic didn't start
+      const name = err?.name;
+      const msg = name === "NotFoundError"
+        ? "找不到麥克風裝置，請確認系統有可用的錄音設備"
+        : name === "NotAllowedError"
+          ? "麥克風權限被拒絕，請在瀏覽器設定中允許麥克風存取"
+          : name === "NotReadableError"
+            ? "麥克風被其他程式佔用中"
+            : `麥克風初始化失敗：${err?.message ?? err}`;
+      setError(msg);
+      listening = false;
+      listenPaused = true;
     }
   }
 
@@ -557,7 +569,7 @@
   }
 </script>
 
-<div class="hud" class:has-tabs={getSessions().length > 1} class:ai-speaking={getState() === "speaking"} class:user-speaking={getState() === "listening"} class:ai-thinking={getState() === "thinking"}>
+<div class="hud" class:has-tabs={getSessions().length > 1} class:has-input={showChatInput} class:ai-speaking={getState() === "speaking"} class:user-speaking={getState() === "listening"} class:ai-thinking={getState() === "thinking"}>
   <!-- Edge glow -->
   <div class="edge-glow"></div>
   <!-- Sci-fi side panels (thinking / tool-use) -->
@@ -652,38 +664,88 @@
     <NotebookOverlay bind:this={notebookRef} content={getNotebookContent()!} onClose={() => { clearNotebookContent(); send({ type: "notebook_state", active: false } as any); }} />
   {/if}
 
-  <!-- Subtitle overlay (bottom, does not push layout) -->
-  <div class="hud-subtitle-overlay" class:hidden={getCameraOn() || showChatInput} class:has-tabs={getSessions().length > 1}>
+  <!-- Conversation holo windows (AI / User / Error — draggable & closable) -->
+  <!-- Hidden when a fullscreen overlay is active (camera/map/notebook/screenshot) -->
+  {#if !getCameraOn() && !getMapQuery() && !getNotebookContent() && !screenshotActive}
     <Subtitle />
-  </div>
+  {/if}
 
-  <!-- Text input bar (replaces subtitle area when active) -->
-  {#if showChatInput}
-    <div class="chat-input-bar" class:has-tabs={getSessions().length > 1}>
+  <!-- Background task popups (also hidden under fullscreen overlays to avoid -->
+  <!-- visually-trapped panels behind opaque overlays) -->
+  {#if !getCameraOn() && !getMapQuery() && !getNotebookContent() && !screenshotActive}
+    <TaskPopups />
+  {/if}
+
+  <!-- Text input — Sci-fi command console (also hidden under fullscreen overlays) -->
+  {#if showChatInput && !getCameraOn() && !getMapQuery() && !getNotebookContent() && !screenshotActive}
+    <div
+      class="cmd-console"
+      class:has-tabs={getSessions().length > 1}
+      class:capturing={chatInput.trim().length > 0}
+      class:listening={listening && !listenPaused && getState() === "listening"}
+    >
+      <!-- Outer capture frame (animates when typing or voice listening) -->
+      <div class="cc-capture-frame" aria-hidden="true">
+        <span class="ccf c1"></span><span class="ccf c2"></span>
+        <span class="ccf c3"></span><span class="ccf c4"></span>
+      </div>
+      <div class="cc-bracket tl"></div>
+      <div class="cc-bracket tr"></div>
+      <div class="cc-bracket bl"></div>
+      <div class="cc-bracket br"></div>
+      <div class="cc-rail"></div>
+
+      <div class="cc-prefix">
+        <span class="cc-chevron">&gt;</span>
+        <span class="cc-label">CMD</span>
+        <span class="cc-divider">/</span>
+        <span class="cc-target">JARVIS</span>
+      </div>
+
       <input
         type="text"
-        class="chat-input"
-        placeholder="輸入訊息或貼上連結..."
+        class="cmd-input"
+        placeholder="輸入指令、貼上連結或描述任務..."
+        spellcheck="false"
+        autocomplete="off"
         bind:value={chatInput}
         onkeydown={handleChatKeydown}
       />
-      <button class="chat-send-btn" onclick={sendChatText} disabled={!chatInput.trim()}>
-        ➤
+
+      <div class="cc-meta">
+        <span class="cc-count">{chatInput.length.toString().padStart(3, '0')}</span>
+        <span class="cc-divider">/</span>
+        <span class="cc-hint">↵ SEND</span>
+      </div>
+
+      <button class="cc-send" onclick={sendChatText} disabled={!chatInput.trim()} title="送出">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+          <path d="M5 12h14M13 6l6 6-6 6" stroke-linecap="square" stroke-linejoin="miter"/>
+        </svg>
       </button>
     </div>
   {/if}
 
-  <!-- Session tabs (bottom bar, only shown when >1 session) -->
-  <SessionTabs onSwitch={(id) => send({ type: 'switch_session', sessionId: id } as any)} />
+  <!-- Session tabs (bottom bar, only shown when >1 session and no fullscreen overlay) -->
+  {#if !getCameraOn() && !getMapQuery() && !getNotebookContent() && !screenshotActive}
+    <SessionTabs onSwitch={(id) => send({ type: 'switch_session', sessionId: id } as any)} />
+  {/if}
 
   <!-- Persistent floating mic toggle button (always visible for walk-around use) -->
   <button
     class="mic-fab"
     class:mic-on={listening && !listenPaused}
     class:mic-paused={listenPaused}
+    class:mic-capturing={getState() === "listening"}
     onclick={() => toggleListening()}
     title={listening && !listenPaused ? "暫停收聽 (M)" : "開始收聽 (M)"}
   >
+    <!-- Voice capture scan frame -->
+    <span class="mic-frame" aria-hidden="true">
+      <span class="mf c1"></span><span class="mf c2"></span>
+      <span class="mf c3"></span><span class="mf c4"></span>
+      <span class="mf-ring"></span>
+    </span>
     {#if listening && !listenPaused}
       <svg class="mic-fab-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z"/><path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/></svg>
     {:else}
@@ -694,6 +756,10 @@
 
 <style>
   .hud {
+    /* Bottom layer offsets — single source of truth for stacking */
+    --tabs-h: 0px;
+    --console-h: 0px;
+    --mic-gap: 0px; /* extra space reserved on mobile for mic FAB */
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -709,9 +775,8 @@
     transition: box-shadow 0.5s ease;
   }
 
-  .hud.has-tabs {
-    padding-bottom: 48px;
-  }
+  .hud.has-tabs { --tabs-h: 44px; padding-bottom: 48px; }
+  .hud.has-input { --console-h: 64px; }
 
   /* === Grid Overlay (sci-fi wireframe) === */
   .grid-overlay {
@@ -1105,9 +1170,8 @@
     scrollbar-width: none;
     transition: opacity 0.3s, bottom 0.3s;
   }
-  .hud-subtitle-overlay.has-tabs {
-    bottom: 56px;
-  }
+  .hud-subtitle-overlay.has-tabs { bottom: calc(var(--tabs-h) + 12px); }
+  .hud-subtitle-overlay.has-input { bottom: calc(var(--tabs-h) + var(--console-h) + 16px); }
   .hud-subtitle-overlay::-webkit-scrollbar {
     display: none;
   }
@@ -1209,7 +1273,7 @@
   /* === Persistent Floating Mic FAB === */
   .mic-fab {
     position: fixed;
-    bottom: 32px;
+    bottom: calc(var(--tabs-h) + 24px);
     right: 24px;
     z-index: 9999;
     width: 64px;
@@ -1229,8 +1293,46 @@
     touch-action: manipulation;
   }
 
-  .hud.has-tabs .mic-fab {
-    bottom: 56px;
+  /* When console open on desktop, nudge mic up a touch above it visually */
+  .hud.has-input .mic-fab { bottom: calc(var(--tabs-h) + var(--console-h) + 16px); }
+
+  /* Voice capture scan frame around mic FAB */
+  .mic-frame {
+    position: absolute;
+    inset: -12px;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+  }
+  .mic-fab.mic-on .mic-frame { opacity: 0.6; }
+  .mic-fab.mic-capturing .mic-frame { opacity: 1; }
+  .mf {
+    position: absolute;
+    width: 16px;
+    height: 16px;
+    border-color: var(--accent);
+    filter: drop-shadow(0 0 6px rgba(0, 212, 255, 0.8));
+  }
+  .mf.c1 { top: 0; left: 0; border-top: 2px solid; border-left: 2px solid; }
+  .mf.c2 { top: 0; right: 0; border-top: 2px solid; border-right: 2px solid; }
+  .mf.c3 { bottom: 0; left: 0; border-bottom: 2px solid; border-left: 2px solid; }
+  .mf.c4 { bottom: 0; right: 0; border-bottom: 2px solid; border-right: 2px solid; }
+  .mf-ring {
+    position: absolute;
+    inset: 0;
+    border-radius: 50%;
+    border: 1px solid rgba(0, 212, 255, 0.4);
+    animation: micRing 2s ease-out infinite;
+  }
+  .mic-fab.mic-capturing .mf,
+  .mic-fab.mic-capturing .mf-ring {
+    border-color: var(--purple);
+    filter: drop-shadow(0 0 8px rgba(123, 97, 255, 0.9));
+    animation: micRing 1.1s ease-out infinite;
+  }
+  @keyframes micRing {
+    0%   { transform: scale(0.85); opacity: 0.9; }
+    100% { transform: scale(1.35); opacity: 0; }
   }
 
   .mic-fab:active {
@@ -1262,79 +1364,255 @@
 
   @media (max-width: 600px) {
     .mic-fab {
-      width: 48px;
-      height: 48px;
-      bottom: 80px;
-      right: 12px;
+      width: 52px;
+      height: 52px;
+      bottom: calc(var(--tabs-h) + var(--console-h) + 16px);
+      right: 14px;
     }
     .mic-fab-icon {
       width: 22px;
       height: 22px;
     }
+    /* On mobile when input visible, mic moves to LEFT to free center for input — avoids overlap */
+    .hud.has-input .mic-fab {
+      right: auto;
+      left: 14px;
+      bottom: calc(var(--tabs-h) + var(--console-h) + 16px);
+    }
   }
 
-  /* Chat input bar — same position as subtitle */
-  .chat-input-bar {
+  /* === Sci-fi Command Console (text input) === */
+  .cmd-console {
     position: fixed;
-    bottom: 24px;
+    bottom: calc(var(--tabs-h) + 16px);
     left: 50%;
     transform: translateX(-50%);
     z-index: 50;
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 12px;
     width: calc(100% - 32px);
-    max-width: 600px;
-    padding: 8px 12px;
-    border-radius: 24px;
-    border: 1px solid rgba(0, 212, 255, 0.3);
-    background: rgba(10, 15, 30, 0.9);
-    backdrop-filter: blur(12px);
-    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+    max-width: 720px;
+    padding: 10px 14px 10px 18px;
+    /* Angular hexagonal-ish frame */
+    clip-path: polygon(
+      14px 0,
+      calc(100% - 14px) 0,
+      100% 50%,
+      calc(100% - 14px) 100%,
+      14px 100%,
+      0 50%
+    );
+    background:
+      linear-gradient(135deg, rgba(2, 14, 28, 0.92) 0%, rgba(8, 4, 20, 0.94) 100%);
+    border: 1px solid rgba(0, 212, 255, 0.4);
+    box-shadow:
+      0 0 0 1px rgba(0, 212, 255, 0.08),
+      0 8px 36px rgba(0, 212, 255, 0.22),
+      0 0 80px rgba(0, 212, 255, 0.12),
+      inset 0 1px 0 rgba(255, 255, 255, 0.05);
+    backdrop-filter: blur(16px) saturate(1.5);
+    -webkit-backdrop-filter: blur(16px) saturate(1.5);
+    transition: box-shadow 0.3s ease, transform 0.3s ease;
+    animation: consoleIn 0.35s cubic-bezier(0.2, 0.9, 0.3, 1.2);
+    overflow: hidden;
+    isolation: isolate;
+  }
+  .cmd-console.has-tabs { bottom: calc(var(--tabs-h) + 16px); }
+
+  /* === Capture frame (corner brackets that pulse when typing or voice listening) === */
+  .cc-capture-frame {
+    position: absolute;
+    inset: -10px;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+    z-index: -1;
+  }
+  .cmd-console.capturing .cc-capture-frame,
+  .cmd-console.listening .cc-capture-frame,
+  .cmd-console:focus-within .cc-capture-frame { opacity: 1; }
+
+  .ccf {
+    position: absolute;
+    width: 22px;
+    height: 22px;
+    border-color: var(--accent);
+    filter: drop-shadow(0 0 6px rgba(0, 212, 255, 0.7));
+    animation: capturePulse 1.4s ease-in-out infinite;
+  }
+  .ccf.c1 { top: 0; left: 0; border-top: 2px solid; border-left: 2px solid; }
+  .ccf.c2 { top: 0; right: 0; border-top: 2px solid; border-right: 2px solid; animation-delay: 0.15s; }
+  .ccf.c3 { bottom: 0; left: 0; border-bottom: 2px solid; border-left: 2px solid; animation-delay: 0.3s; }
+  .ccf.c4 { bottom: 0; right: 0; border-bottom: 2px solid; border-right: 2px solid; animation-delay: 0.45s; }
+  .cmd-console.listening .ccf {
+    border-color: var(--purple);
+    filter: drop-shadow(0 0 8px rgba(123, 97, 255, 0.8));
+    animation-duration: 0.8s;
+  }
+  @keyframes capturePulse {
+    0%, 100% { transform: scale(1); opacity: 0.5; }
+    50%      { transform: scale(1.04); opacity: 1; }
   }
 
-  .chat-input-bar.has-tabs {
-    bottom: 56px;
+  /* Animated scanning rail along the top edge */
+  .cc-rail {
+    position: absolute;
+    top: 0;
+    left: 0;
+    height: 2px;
+    width: 60px;
+    background: linear-gradient(90deg, transparent, var(--accent), transparent);
+    animation: railSweep 3.2s linear infinite;
+    pointer-events: none;
+    opacity: 0.85;
   }
 
-  .chat-input {
+  /* Corner brackets */
+  .cmd-console .cc-bracket {
+    position: absolute;
+    width: 10px;
+    height: 10px;
+    border-color: var(--accent);
+    pointer-events: none;
+    opacity: 0.85;
+  }
+  .cmd-console .cc-bracket.tl { top: 4px; left: 18px; border-top: 1.5px solid; border-left: 1.5px solid; }
+  .cmd-console .cc-bracket.tr { top: 4px; right: 18px; border-top: 1.5px solid; border-right: 1.5px solid; }
+  .cmd-console .cc-bracket.bl { bottom: 4px; left: 18px; border-bottom: 1.5px solid; border-left: 1.5px solid; }
+  .cmd-console .cc-bracket.br { bottom: 4px; right: 18px; border-bottom: 1.5px solid; border-right: 1.5px solid; }
+
+  .cc-prefix {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    flex-shrink: 0;
+    user-select: none;
+  }
+  .cc-chevron {
+    color: var(--accent);
+    font-weight: 700;
+    text-shadow: 0 0 8px var(--accent);
+    animation: chevPulse 1.6s ease-in-out infinite;
+  }
+  .cc-label {
+    color: var(--accent);
+    font-weight: 600;
+  }
+  .cc-target {
+    color: rgba(220, 240, 255, 0.7);
+  }
+  .cc-divider {
+    color: rgba(0, 212, 255, 0.35);
+    font-weight: 300;
+  }
+
+  .cmd-input {
     flex: 1;
     border: none;
     outline: none;
     background: transparent;
-    color: #e8eaf0;
+    color: rgba(220, 240, 255, 0.98);
+    font-family: var(--font-mono);
     font-size: 0.95rem;
+    letter-spacing: 0.02em;
     padding: 6px 4px;
-    font-family: inherit;
+    caret-color: var(--accent);
+    text-shadow: 0 0 8px rgba(0, 212, 255, 0.3);
+    min-width: 0;
+  }
+  .cmd-input::placeholder {
+    color: rgba(120, 160, 200, 0.45);
+    font-style: normal;
+    font-family: var(--font);
+    letter-spacing: 0.04em;
   }
 
-  .chat-input::placeholder {
-    color: rgba(200, 210, 230, 0.4);
+  /* Focus glow */
+  .cmd-console:focus-within {
+    border-color: rgba(0, 212, 255, 0.7);
+    box-shadow:
+      0 0 0 1px rgba(0, 212, 255, 0.18),
+      0 8px 50px rgba(0, 212, 255, 0.4),
+      0 0 120px rgba(0, 212, 255, 0.22),
+      inset 0 1px 0 rgba(255, 255, 255, 0.08);
   }
 
-  .chat-send-btn {
-    width: 36px;
-    height: 36px;
-    border-radius: 50%;
-    border: 1px solid rgba(0, 212, 255, 0.4);
-    background: rgba(0, 212, 255, 0.1);
-    color: #00d4ff;
-    font-size: 1.1rem;
-    cursor: pointer;
+  .cc-meta {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-family: var(--font-mono);
+    font-size: 0.65rem;
+    letter-spacing: 0.12em;
+    color: rgba(180, 210, 240, 0.55);
+    flex-shrink: 0;
+    user-select: none;
+  }
+  .cc-count {
+    color: var(--accent);
+    min-width: 28px;
+    text-align: right;
+  }
+  .cc-hint {
+    color: rgba(180, 210, 240, 0.55);
+  }
+
+  .cc-send {
+    width: 38px;
+    height: 38px;
     display: flex;
     align-items: center;
     justify-content: center;
-    transition: all 0.2s;
+    color: var(--accent);
+    background: linear-gradient(135deg, rgba(0, 212, 255, 0.18), rgba(0, 212, 255, 0.06));
+    border: 1px solid rgba(0, 212, 255, 0.5);
+    clip-path: polygon(8px 0, 100% 0, 100% calc(100% - 8px), calc(100% - 8px) 100%, 0 100%, 0 8px);
+    cursor: pointer;
+    transition: all 0.2s ease;
     flex-shrink: 0;
   }
-
-  .chat-send-btn:hover:not(:disabled) {
-    background: rgba(0, 212, 255, 0.2);
-    box-shadow: 0 0 10px rgba(0, 212, 255, 0.3);
+  .cc-send svg { width: 18px; height: 18px; }
+  .cc-send:hover:not(:disabled) {
+    background: linear-gradient(135deg, rgba(0, 212, 255, 0.36), rgba(0, 212, 255, 0.14));
+    box-shadow: 0 0 18px rgba(0, 212, 255, 0.5), inset 0 0 12px rgba(0, 212, 255, 0.2);
+    transform: translateX(2px);
+  }
+  .cc-send:disabled {
+    opacity: 0.3;
+    cursor: not-allowed;
   }
 
-  .chat-send-btn:disabled {
-    opacity: 0.3;
-    cursor: default;
+  @keyframes consoleIn {
+    from { opacity: 0; transform: translate(-50%, 12px) scale(0.96); filter: blur(4px); }
+    to   { opacity: 1; transform: translate(-50%, 0) scale(1); filter: blur(0); }
+  }
+  @keyframes railSweep {
+    0%   { left: -60px; opacity: 0; }
+    10%  { opacity: 1; }
+    90%  { opacity: 1; }
+    100% { left: 100%; opacity: 0; }
+  }
+  @keyframes chevPulse {
+    0%, 100% { opacity: 1; text-shadow: 0 0 8px var(--accent); }
+    50%      { opacity: 0.55; text-shadow: 0 0 16px var(--accent); }
+  }
+
+  @media (max-width: 600px) {
+    .cmd-console {
+      padding: 8px 10px 8px 14px;
+      gap: 8px;
+    }
+    .cc-prefix { font-size: 0.62rem; gap: 4px; }
+    .cc-target { display: none; }
+    .cc-meta { display: none; }
+    .cmd-input { font-size: 0.88rem; }
+    .cc-send { width: 32px; height: 32px; }
+    .cc-send svg { width: 16px; height: 16px; }
   }
 </style>
