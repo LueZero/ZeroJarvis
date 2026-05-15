@@ -1,7 +1,7 @@
 <script lang="ts">
   /**
    * Restaurant results panel — overlays on MapOverlay
-   * Shows OpenTable restaurant search results as floating cards
+   * Shows Google Maps restaurant search results as floating cards
    */
   import type { FoodSearchData, RestaurantInfo } from "@zerojarvis/shared";
 

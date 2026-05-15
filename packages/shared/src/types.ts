@@ -145,7 +145,7 @@ export const DEFAULT_CONFIG: UserConfig = {
   language: "zh-TW",
 };
 
-// --- Restaurant / Food Search (via OpenTable) ---
+// --- Restaurant / Food Search (via Google Maps) ---
 export interface RestaurantInfo {
   name: string;
   rating: number;
@@ -155,16 +155,12 @@ export interface RestaurantInfo {
   address: string;
   status: string;
   mapsUrl?: string;
-  pageUrl?: string;
-  slots?: { time: string; bookingUrl: string }[];
 }
 
 export interface FoodSearchData {
   query: string;
   restaurants: RestaurantInfo[];
   searchedAt: string;
-  searchUrl?: string;
-  source?: string;
 }
 
 // --- OpenTable Reservation ---

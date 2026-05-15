@@ -19,16 +19,14 @@ description: 當使用者詢問餐廳、美食推薦、想吃東西時，透過 
 
 ## MCP 工具：onetable-food
 
-當使用者找餐廳、美食推薦、想吃東西時，**先呼叫 `onetable-food` 的 `search_restaurants` 工具**，從 OpenTable 取得推薦餐廳、評分、可訂位時段等資料。
+當使用者找餐廳、美食推薦、想吃東西時，**先呼叫 `onetable-food` 的 `search_restaurants` 工具**，從 Google Maps 取得評分、料理類型、營業狀態等資料。
 
 流程：
-1. 呼叫 `search_restaurants` 工具（搜尋詞包含地點 + 類型，可帶日期/時間/人數）
+1. 呼叫 `search_restaurants` 工具（搜尋詞包含地點 + 類型）
 2. 根據回傳資料，用 1-2 句簡短口語介紹（提及推薦的店名和評分）
 3. 結尾附上 `[ACTION:MAP:搜尋詞]` 開啟 Google Maps 顯示位置
 
 系統會自動將工具回傳的餐廳資料顯示在地圖旁邊的面板上，你不需要額外處理。
-
-**優勢**：從 OpenTable 搜尋確保推薦的餐廳都可以直接訂位，不會推薦到無法訂位的店家。
 
 ## MCP 工具：search_opentable（查詢訂位時段）
 
@@ -86,8 +84,8 @@ description: 當使用者詢問餐廳、美食推薦、想吃東西時，透過 
 
 ## 何時觸發
 
-- 使用者問「附近有什麼好吃的」「推薦餐廳」→ 呼叫 search_restaurants（OpenTable）+ 介紹 + MAP
-- 使用者問「哪裡有XXX餐廳」「晚餐吃什麼」→ 呼叫 search_restaurants（OpenTable）+ 介紹 + MAP
+- 使用者問「附近有什麼好吃的」「推薦餐廳」→ 呼叫 search_restaurants + 介紹 + **必須附 MAP**
+- 使用者問「哪裡有XXX餐廳」「晚餐吃什麼」→ 呼叫 search_restaurants + 介紹 + **必須附 MAP**
 - 使用者要「訂位」「預約」「book」某餐廳 → 先呼叫 search_opentable，確認後呼叫 book_opentable
 - 使用者問的是景點、加油站、醫院等非餐飲場所 → **不觸發此技能**
 - 使用者只是閒聊但沒有要找餐廳 → 不觸發
@@ -97,7 +95,14 @@ description: 當使用者詢問餐廳、美食推薦、想吃東西時，透過 
 - 先用 1-2 句簡短介紹（適合語音朗讀）
 - 如果有 MCP 工具結果，提及 1-2 家推薦店名和評分
 - 不要列出太多細節（地址、電話等由地圖/餐廳面板顯示）
-- 結尾附帶 ACTION 標記
+- **回覆結尾必須附上 `[ACTION:MAP:搜尋詞]` 標記，沒有例外**
+- 如果忘記附 MAP 標記，使用者就看不到地圖，這是嚴重錯誤
+
+## ⚠️ 強制規則
+
+**每次呼叫 `search_restaurants` 後的回覆，結尾一定要加 `[ACTION:MAP:搜尋詞]`。**
+不管搜到幾間、不管有沒有營業中的餐廳，都必須附上 MAP 標記讓使用者看到地圖。
+沒有 MAP 標記 = 功能壞掉。
 
 ## 範例
 

@@ -124,7 +124,7 @@ JSON payload（如 NOTEBOOK）使用 brace-counting 解析，不受巢狀 `]` �
 **MCP 工具清單：**
 | 工具 | 功能 |
 |------|------|
-| `search_restaurants` | OpenTable 搜尋推薦餐廳、評分、可訂位時段 |
+| `search_restaurants` | Google Maps 搜尋餐廳評分、營業狀態 |
 | `search_opentable` | OpenTable 查詢可訂位時段（CDP 自動化） |
 | `book_opentable` | 選時段 → 填表 → 提交 → 處理 auth iframe |
 | `complete_booking` | 填入簡訊驗證碼 + 詳細資料 → 完成訂位 |
