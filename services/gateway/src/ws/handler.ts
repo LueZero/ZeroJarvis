@@ -3,7 +3,7 @@ import type { ClientMessage, ServerMessage, AgentState, NotebookContentType } fr
 import { transcribe } from "../stt/whisper.js";
 import { chatStream, resetSession, parseActions, parseAsyncTask, parseSchedule, parseScheduleRepeat, parseMemory, getSessionTokens, summarizeSession, shouldAutoCompact } from "../llm/opencode.js";
 import { processVision } from "../vision/processor.js";
-import { synthesize } from "../tts/edge-tts.js";
+import { synthesize } from "../tts/index.js";
 import { polish } from "../polish/polisher.js";
 import { log, logWarn, logError } from "../logger.js";
 import * as sessionManager from "../session/manager.js";
