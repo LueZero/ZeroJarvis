@@ -170,9 +170,16 @@ $env:Path = "C:\Users\CIM\.local\bin;$env:Path"; notebooklm download quiz files/
 - `notebooklm download quiz files/notebooklm/quiz.json --latest`（quiz 不支援 --latest）
 - `notebooklm download flashcards flashcards.json`（缺少 `files/notebooklm/` 前綴）
 
-> ⚠️ **LaTeX 清理（quiz / flashcards JSON 必做）**：NotebookLM 產生的 JSON 內含 LaTeX 標記（`$...$`、`\frac{}{}`、`\Omega` 等），下載後必須立即執行清理：
+> ⚠️ **下載後處理（quiz / flashcards JSON 必做）**：NotebookLM CLI 下載的 JSON 有兩個問題：(1) 中文被序列化為 `\uXXXX` Unicode escape (2) 公式含 LaTeX 標記。下載後必須依序執行：
+>
+> **Step 1 — Unicode 解碼**（`\uXXXX` → 真正中文字）：
 > ```powershell
-> $f = "files/notebooklm/<filename>.json"; $c = [IO.File]::ReadAllText($f, [Text.Encoding]::UTF8); $c = $c -replace '\\frac\{([^}]+)\}\{([^}]+)\}','$1/$2' -replace '\\eta','η' -replace '\\rho','ρ' -replace '\\ell','ℓ' -replace '\\Omega','Ω' -replace '\\%','%' -replace '\$',''; [IO.File]::WriteAllText($f, $c, [Text.Encoding]::UTF8)
+> $f = "files/notebooklm/<filename>.json"; $raw = [IO.File]::ReadAllText($f, [Text.Encoding]::UTF8); $decoded = [System.Text.RegularExpressions.Regex]::Replace($raw, '\\u([0-9A-Fa-f]{4})', { param($m) [char]::ConvertFromUtf32([Convert]::ToInt32($m.Groups[1].Value, 16)) }); [IO.File]::WriteAllText($f, $decoded, (New-Object System.Text.UTF8Encoding $false))
+> ```
+>
+> **Step 2 — LaTeX 清理**（移除 `$...$` 和 LaTeX 指令）：
+> ```powershell
+> $f = "files/notebooklm/<filename>.json"; $c = [IO.File]::ReadAllText($f, [Text.Encoding]::UTF8); $c = $c -replace '\\frac\{([^}]+)\}\{([^}]+)\}','$1/$2' -replace '\\times','×' -replace '\\div','÷' -replace '\\pm','±' -replace '\\geq','≥' -replace '\\leq','≤' -replace '\\neq','≠' -replace '\\approx','≈' -replace '\\infty','∞' -replace '\\sqrt','√' -replace '\\pi','π' -replace '\\eta','η' -replace '\\rho','ρ' -replace '\\ell','ℓ' -replace '\\Omega','Ω' -replace '\\Delta','Δ' -replace '\\alpha','α' -replace '\\beta','β' -replace '\\gamma','γ' -replace '\\theta','θ' -replace '\\lambda','λ' -replace '\\mu','μ' -replace '\\sigma','σ' -replace '\\omega','ω' -replace '\\cdot','·' -replace '\\rightarrow','→' -replace '\\leftarrow','←' -replace '\\\\','/' -replace '\\%','%' -replace '\\(?=[A-Za-z0-9])',''; $c = $c -replace '\\(?=[^\s\\"])',''; $c = $c -replace '\$',''; [IO.File]::WriteAllText($f, $c, (New-Object System.Text.UTF8Encoding $false))
 > ```
 
 ### Note（筆記）
