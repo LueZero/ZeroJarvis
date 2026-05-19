@@ -1,7 +1,7 @@
 import type { ServerWebSocket } from "bun";
 import type { ClientMessage, ServerMessage, AgentState, NotebookContentType } from "@zerojarvis/shared";
 import { transcribe } from "../stt/whisper.js";
-import { chatStream, resetSession, parseActions, parseAsyncTask, parseSchedule, parseScheduleRepeat, parseMemory, getSessionTokens, summarizeSession, shouldAutoCompact } from "../llm/opencode.js";
+import { chatStream, resetSession, parseActions, parseAsyncTask, parseSchedule, parseScheduleRepeat, parseMemory, stripMarkdown, getSessionTokens, summarizeSession, shouldAutoCompact } from "../llm/opencode.js";
 import { processVision } from "../vision/processor.js";
 import { synthesize } from "../tts/index.js";
 import { polish } from "../polish/polisher.js";
@@ -13,6 +13,43 @@ import * as taskWorker from "../task/worker.js";
 import * as scheduler from "../task/scheduler.js";
 import * as eventHub from "../task/event-hub.js";
 import * as memory from "../task/memory.js";
+
+/** Route MCP tool output to the appropriate frontend overlay */
+function routeToolOutput(ws: ServerWebSocket<WSData>, toolName: string, output: string) {
+  if (toolName.includes("search_restaurants")) {
+    try {
+      const data = JSON.parse(output);
+      send(ws, { type: "food_results", data } as any);
+      log("ONETABLE", `MCP tool returned ${data.restaurants?.length ?? 0} restaurants`);
+    } catch {}
+  }
+  if (toolName.includes("search_opentable")) {
+    try {
+      const data = JSON.parse(output);
+      send(ws, { type: "opentable_results", data } as any);
+      log("ONETABLE", `MCP tool returned ${data.results?.length ?? 0} restaurants, found=${data.found}`);
+    } catch {}
+  }
+  if (toolName.includes("youtube_")) {
+    try {
+      const data = JSON.parse(output);
+      const typeMap: Record<string, string> = {
+        youtube_search: "search",
+        youtube_video_info: "video",
+        youtube_channel_info: "channel",
+        youtube_trending: "trending",
+        youtube_compare: "compare",
+      };
+      // toolName may be prefixed (e.g. "youtube-toolkit_youtube_search")
+      // so match against the suffix
+      const overlayType = Object.entries(typeMap).find(([k]) => toolName.includes(k))?.[1];
+      if (overlayType) {
+        send(ws, { type: "youtube_results", data: { type: overlayType, data } } as any);
+        log("YOUTUBE", `MCP tool ${toolName} → overlay type=${overlayType}`);
+      }
+    } catch {}
+  }
+}
 
 interface WSData {
   id: string;
@@ -385,20 +422,7 @@ export function handleWebSocket() {
               },
               (err) => { throw err; },
               (toolName, output) => {
-                if (toolName.includes("search_restaurants")) {
-                  try {
-                    const data = JSON.parse(output);
-                    send(ws, { type: "food_results", data } as any);
-                    log("ONETABLE", `MCP tool returned ${data.restaurants?.length ?? 0} restaurants`);
-                  } catch {}
-                }
-                if (toolName.includes("search_opentable")) {
-                  try {
-                    const data = JSON.parse(output);
-                    send(ws, { type: "opentable_results", data } as any);
-                    log("ONETABLE", `MCP tool returned ${data.results?.length ?? 0} restaurants, found=${data.found}`);
-                  } catch {}
-                }
+                routeToolOutput(ws, toolName, output);
               },
               (event) => send(ws, { type: "activity", event } as any),
             );
@@ -412,6 +436,7 @@ export function handleWebSocket() {
             ttsText = parseSchedule(ttsText).cleanText;
             ttsText = parseScheduleRepeat(ttsText).cleanText;
             ttsText = parseMemory(ttsText).cleanText;
+            ttsText = stripMarkdown(ttsText);
             if (ttsText && sessionManager.getActiveId() === managedId) {
               setState(ws, "speaking");
               const ttsStart = performance.now();
@@ -490,27 +515,15 @@ export function handleWebSocket() {
               },
               (err) => { throw err; },
               (toolName, output) => {
-                if (toolName.includes("search_restaurants")) {
-                  try {
-                    const data = JSON.parse(output);
-                    send(ws, { type: "food_results", data } as any);
-                    log("ONETABLE", `MCP tool returned ${data.restaurants?.length ?? 0} restaurants`);
-                  } catch {}
-                }
-                if (toolName.includes("search_opentable")) {
-                  try {
-                    const data = JSON.parse(output);
-                    send(ws, { type: "opentable_results", data } as any);
-                    log("ONETABLE", `MCP tool returned ${data.results?.length ?? 0} restaurants, found=${data.found}`);
-                  } catch {}
-                }
+                routeToolOutput(ws, toolName, output);
               },
               (event) => send(ws, { type: "activity", event } as any),
             );
 
             // TTS only if still active session
             if (sessionManager.getActiveId() === activeSession.id) {
-              const { cleanText } = parseActions(fullText);
+              let { cleanText } = parseActions(fullText);
+              cleanText = stripMarkdown(cleanText);
               if (cleanText) {
                 setState(ws, "speaking");
                 const audioData = await synthesize(cleanText);
@@ -938,20 +951,7 @@ export async function processAudio(ws: ServerWebSocket<WSData>) {
         throw err;
       },
       (toolName, output) => {
-        if (toolName.includes("search_restaurants")) {
-          try {
-            const data = JSON.parse(output);
-            send(ws, { type: "food_results", data } as any);
-            log("ONETABLE", `MCP tool returned ${data.restaurants?.length ?? 0} restaurants`);
-          } catch {}
-        }
-        if (toolName.includes("search_opentable")) {
-          try {
-            const data = JSON.parse(output);
-            send(ws, { type: "opentable_results", data } as any);
-            log("ONETABLE", `MCP tool returned ${data.results?.length ?? 0} restaurants, found=${data.found}`);
-          } catch {}
-        }
+        routeToolOutput(ws, toolName, output);
       },
       (event) => send(ws, { type: "activity", event } as any),
     );

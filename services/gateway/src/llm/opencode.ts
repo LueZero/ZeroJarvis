@@ -173,6 +173,44 @@ export function parseMemory(text: string): { cleanText: string; memories: { name
   return { cleanText, memories: memories.length > 0 ? memories : null };
 }
 
+/** Strip markdown syntax from text so TTS reads naturally.
+ *  Removes headings markers, bold/italic markers, code fences, links, etc. */
+export function stripMarkdown(text: string): string {
+  return text
+    // Code blocks (``` ... ```)
+    .replace(/```[\s\S]*?```/g, (m) => m.replace(/```\w*\n?/g, "").replace(/```/g, ""))
+    // Inline code
+    .replace(/`([^`]+)`/g, "$1")
+    // Headings
+    .replace(/^#{1,6}\s+/gm, "")
+    // Bold + italic
+    .replace(/\*\*\*(.+?)\*\*\*/g, "$1")
+    .replace(/\*\*(.+?)\*\*/g, "$1")
+    .replace(/\*(.+?)\*/g, "$1")
+    .replace(/___(.+?)___/g, "$1")
+    .replace(/__(.+?)__/g, "$1")
+    .replace(/_(.+?)_/g, "$1")
+    // Strikethrough
+    .replace(/~~(.+?)~~/g, "$1")
+    // Links [text](url)
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+    // Images ![alt](url)
+    .replace(/!\[([^\]]*)\]\([^)]+\)/g, "$1")
+    // Blockquotes
+    .replace(/^\s*>\s?/gm, "")
+    // Unordered list markers
+    .replace(/^\s*[-*+]\s+/gm, "")
+    // Ordered list markers
+    .replace(/^\s*\d+\.\s+/gm, "")
+    // Horizontal rules
+    .replace(/^[-*_]{3,}\s*$/gm, "")
+    // HTML tags (basic)
+    .replace(/<[^>]+>/g, "")
+    // Multiple blank lines → single
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
 /** Get or create an OpenCode session for a managed session */
 async function getOrCreateOpenCodeSession(managedSessionId: string): Promise<string> {
   const existing = openCodeSessions.get(managedSessionId);
