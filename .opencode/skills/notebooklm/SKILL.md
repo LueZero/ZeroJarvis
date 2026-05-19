@@ -256,10 +256,26 @@ $env:Path = "C:\Users\CIM\.local\bin;$env:Path"; notebooklm download quiz files/
 
 - `markdown`：Markdown 純文字
 - `mindmap`：JSON 字串 `{"label":"根節點","children":[{"label":"子節點","children":[]}]}`
-- `quiz`：JSON 陣列 `[{"question":"題目","options":["A","B","C","D"],"correct":0,"rationale":"解說"}]`
+- `quiz`：JSON 陣列 `[{"question":"題目","options":["A","B","C","D"],"correct":0,"rationale":"解說","hint":"提示"}]`
 - `flashcards`：JSON 陣列 `[{"front":"正面","back":"背面"}]`
 - `media`：檔案相對路徑（如 `files/notebooklm/video-20260507.mp4`），前端會自動嵌入播放器
 - `table`：CSV 字串（含表頭行）
+
+### 測驗導讀規則
+
+呈現測驗時，口語回覆**必須朗讀第一題的題目 + 提示（hint）**，讓使用者在聽覺上能掌握題意方向：
+
+格式範例：
+```
+好，第一題：{question}。提示：{hint}。選項有 A {opt0}、B {opt1}、C {opt2}、D {opt3}。
+[ACTION:NOTEBOOK:{...}]
+```
+
+規則：
+- 必須包含題目全文和提示（hint），不可省略
+- 選項簡述即可（若太長可只唸前幾字）
+- 若 JSON 中沒有 hint 欄位，改說「這題沒有額外提示」
+- ACTION 標記放在最末尾
 
 ### 重要
 

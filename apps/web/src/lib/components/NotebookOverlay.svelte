@@ -18,10 +18,48 @@
   // --- Quiz State ---
   let selectedAnswers = $state<Record<number, number>>({});
   let currentQuestion = $state(0);
+  let quizTransition = $state<'in' | 'out' | 'none'>('none');
+  let showRationale = $state(false);
 
   function selectAnswer(qIdx: number, optIdx: number) {
     if (selectedAnswers[qIdx] !== undefined) return; // already answered
     selectedAnswers = { ...selectedAnswers, [qIdx]: optIdx };
+    showRationale = true;
+  }
+
+  function goToQuestion(idx: number) {
+    if (idx === currentQuestion) return;
+    const qs = quizQuestions();
+    if (!qs || idx < 0 || idx >= qs.length) return;
+    quizTransition = 'out';
+    showRationale = false;
+    setTimeout(() => {
+      currentQuestion = idx;
+      quizTransition = 'in';
+      // Show rationale if already answered
+      if (selectedAnswers[idx] !== undefined) showRationale = true;
+      setTimeout(() => { quizTransition = 'none'; }, 300);
+    }, 200);
+  }
+
+  function nextQuestion() {
+    const qs = quizQuestions();
+    if (qs && currentQuestion < qs.length - 1) {
+      goToQuestion(currentQuestion + 1);
+    }
+  }
+
+  function prevQuestion() {
+    if (currentQuestion > 0) {
+      goToQuestion(currentQuestion - 1);
+    }
+  }
+
+  function resetQuiz() {
+    selectedAnswers = {};
+    currentQuestion = 0;
+    showRationale = false;
+    quizTransition = 'none';
   }
 
   type QuizQuestion = { question: string; options: string[]; correct: number; rationale?: string };
@@ -85,8 +123,7 @@
   }
 
   function scrollToQuestion(idx: number) {
-    const el = document.querySelector(`[data-quiz-idx="${idx}"]`);
-    if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
+    goToQuestion(idx);
   }
 
   // --- Flashcard State ---
@@ -123,11 +160,7 @@
       }
       case "next": {
         if (content.type === "quiz") {
-          const qs = quizQuestions();
-          if (qs && currentQuestion < qs.length - 1) {
-            currentQuestion++;
-            scrollToQuestion(currentQuestion);
-          }
+          nextQuestion();
         } else if (content.type === "flashcards") {
           const cards = flashcardItems();
           if (cards && currentCard < cards.length - 1) {
@@ -138,10 +171,7 @@
       }
       case "prev": {
         if (content.type === "quiz") {
-          if (currentQuestion > 0) {
-            currentQuestion--;
-            scrollToQuestion(currentQuestion);
-          }
+          prevQuestion();
         } else if (content.type === "flashcards") {
           if (currentCard > 0) {
             currentCard--;
@@ -157,9 +187,7 @@
       }
       case "reset": {
         if (content.type === "quiz") {
-          selectedAnswers = {};
-          currentQuestion = 0;
-          scrollToQuestion(0);
+          resetQuiz();
         }
         break;
       }
@@ -256,8 +284,8 @@
           selectAnswer(currentQuestion, Number(e.key) - 1);
         }
       }
-      if (e.key === "ArrowRight" || e.key === "ArrowDown") handleVoiceCommand({ cmd: "next" });
-      if (e.key === "ArrowLeft" || e.key === "ArrowUp") handleVoiceCommand({ cmd: "prev" });
+      if (e.key === "ArrowRight" || e.key === "ArrowDown") { e.preventDefault(); nextQuestion(); }
+      if (e.key === "ArrowLeft" || e.key === "ArrowUp") { e.preventDefault(); prevQuestion(); }
     }
     if (content.type === "flashcards") {
       if (e.key === " " || e.key === "Enter") { e.preventDefault(); handleVoiceCommand({ cmd: "flip" }); }
@@ -310,44 +338,71 @@
                 <span>答對 {quizScore().correct}/{quizScore().answered}</span>
               </div>
             </div>
-            <!-- Quiz navigation buttons -->
-            <div class="quiz-nav">
-              <button class="quiz-nav-btn" disabled={currentQuestion === 0} onclick={() => handleVoiceCommand({ cmd: "prev" })}>◀ 上一題</button>
-              <button class="quiz-nav-btn" disabled={currentQuestion >= questions.length - 1} onclick={() => handleVoiceCommand({ cmd: "next" })}>下一題 ▶</button>
-              <button class="quiz-nav-btn reset" onclick={() => handleVoiceCommand({ cmd: "reset" })}>↻ 重新開始</button>
-            </div>
-            {#each questions as q, qIdx}
-              <div class="quiz-card" class:quiz-current={qIdx === currentQuestion} data-quiz-idx={qIdx} onclick={() => { currentQuestion = qIdx; }}>
-                <div class="quiz-question">{qIdx + 1}. {q.question}</div>
-                <div class="quiz-options">
-                  {#each q.options as opt, oIdx}
-                    <button
-                      class="quiz-option"
-                      class:selected={selectedAnswers[qIdx] === oIdx}
-                      class:correct={selectedAnswers[qIdx] !== undefined && oIdx === q.correct}
-                      class:wrong={selectedAnswers[qIdx] === oIdx && oIdx !== q.correct}
-                      onclick={() => { currentQuestion = qIdx; selectAnswer(qIdx, oIdx); }}
-                    >
-                      <span class="opt-letter">{String.fromCharCode(65 + oIdx)}</span>
-                      <span class="opt-text">{opt}</span>
-                    </button>
-                  {/each}
-                </div>
-                {#if selectedAnswers[qIdx] !== undefined && q.rationale}
-                  <div class="quiz-rationale">
-                    <span class="rationale-label">解說：</span>{q.rationale}
-                  </div>
-                {/if}
-              </div>
-            {/each}
-            <!-- Final score display -->
+
+            <!-- Single question card -->
             {#if quizScore().answered === quizScore().total && quizScore().total > 0}
+              <!-- Final score screen -->
               <div class="quiz-score-final">
                 <div class="score-icon">{quizScore().correct === quizScore().total ? '🎉' : quizScore().correct >= quizScore().total * 0.7 ? '👍' : '📚'}</div>
                 <div class="score-text">得分：{quizScore().correct} / {quizScore().total}</div>
                 <div class="score-pct">{Math.round(quizScore().correct / quizScore().total * 100)}%</div>
+                <button class="quiz-restart-btn" onclick={() => resetQuiz()}>↻ 重新測驗</button>
+              </div>
+            {:else}
+              {@const q = questions[currentQuestion]}
+              <div class="quiz-single-card" class:quiz-transition-out={quizTransition === 'out'} class:quiz-transition-in={quizTransition === 'in'}>
+                <div class="quiz-question-number">Q{currentQuestion + 1}</div>
+                <div class="quiz-question">{q.question}</div>
+                <div class="quiz-options">
+                  {#each q.options as opt, oIdx}
+                    <button
+                      class="quiz-option"
+                      class:selected={selectedAnswers[currentQuestion] === oIdx}
+                      class:correct={selectedAnswers[currentQuestion] !== undefined && oIdx === q.correct}
+                      class:wrong={selectedAnswers[currentQuestion] === oIdx && oIdx !== q.correct}
+                      disabled={selectedAnswers[currentQuestion] !== undefined}
+                      onclick={() => selectAnswer(currentQuestion, oIdx)}
+                    >
+                      <span class="opt-letter">{String.fromCharCode(65 + oIdx)}</span>
+                      <span class="opt-text">{opt}</span>
+                      {#if selectedAnswers[currentQuestion] !== undefined && oIdx === q.correct}
+                        <span class="opt-check">✓</span>
+                      {/if}
+                      {#if selectedAnswers[currentQuestion] === oIdx && oIdx !== q.correct}
+                        <span class="opt-cross">✗</span>
+                      {/if}
+                    </button>
+                  {/each}
+                </div>
+                {#if showRationale && selectedAnswers[currentQuestion] !== undefined && q.rationale}
+                  <div class="quiz-rationale">
+                    <span class="rationale-label">💡 解說：</span>{q.rationale}
+                  </div>
+                {/if}
               </div>
             {/if}
+
+            <!-- Quiz navigation buttons -->
+            <div class="quiz-nav">
+              <button class="quiz-nav-btn" disabled={currentQuestion === 0} onclick={() => prevQuestion()}>◀ 上一題</button>
+              <button class="quiz-nav-btn primary" disabled={currentQuestion >= questions.length - 1} onclick={() => nextQuestion()}>下一題 ▶</button>
+              <button class="quiz-nav-btn reset" onclick={() => resetQuiz()}>↻ 重來</button>
+            </div>
+
+            <!-- Mini question grid -->
+            <div class="quiz-mini-grid">
+              {#each questions as _, idx}
+                <button
+                  class="quiz-mini"
+                  class:quiz-mini-active={idx === currentQuestion}
+                  class:quiz-mini-correct={selectedAnswers[idx] !== undefined && questions[idx].correct === selectedAnswers[idx]}
+                  class:quiz-mini-wrong={selectedAnswers[idx] !== undefined && questions[idx].correct !== selectedAnswers[idx]}
+                  onclick={() => goToQuestion(idx)}
+                >
+                  {idx + 1}
+                </button>
+              {/each}
+            </div>
           {:else}
             <p class="error-text">無法解析測驗資料</p>
           {/if}
@@ -665,6 +720,52 @@
     display: flex;
     flex-direction: column;
     gap: 20px;
+    align-items: center;
+  }
+
+  /* Single card view */
+  .quiz-single-card {
+    width: 100%;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(0, 212, 255, 0.2);
+    border-radius: 12px;
+    padding: 32px 28px;
+    transition: opacity 0.2s ease, transform 0.2s ease;
+    position: relative;
+  }
+
+  .quiz-single-card.quiz-transition-out {
+    opacity: 0;
+    transform: translateX(-20px);
+  }
+
+  .quiz-single-card.quiz-transition-in {
+    animation: quizSlideIn 0.3s ease forwards;
+  }
+
+  @keyframes quizSlideIn {
+    from {
+      opacity: 0;
+      transform: translateX(20px);
+    }
+    to {
+      opacity: 1;
+      transform: translateX(0);
+    }
+  }
+
+  .quiz-question-number {
+    position: absolute;
+    top: -12px;
+    left: 24px;
+    background: #0a0e14;
+    padding: 2px 12px;
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.15em;
+    color: #00d4ff;
+    border: 1px solid rgba(0, 212, 255, 0.3);
+    border-radius: 4px;
   }
 
   .quiz-card {
@@ -681,36 +782,43 @@
   }
 
   .quiz-question {
-    color: rgba(255, 255, 255, 0.9);
-    font-size: 0.9rem;
-    margin-bottom: 12px;
-    line-height: 1.5;
+    color: rgba(255, 255, 255, 0.95);
+    font-size: 1rem;
+    margin-bottom: 20px;
+    line-height: 1.6;
+    font-weight: 400;
   }
 
   .quiz-options {
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: 10px;
   }
 
   .quiz-option {
     display: flex;
     align-items: center;
-    gap: 10px;
-    padding: 10px 14px;
-    border-radius: 6px;
+    gap: 12px;
+    padding: 14px 18px;
+    border-radius: 8px;
     background: rgba(0, 0, 0, 0.3);
     border: 1px solid rgba(255, 255, 255, 0.1);
-    color: rgba(255, 255, 255, 0.75);
+    color: rgba(255, 255, 255, 0.8);
     cursor: pointer;
     transition: all 0.2s;
     text-align: left;
-    font-size: 0.85rem;
+    font-size: 0.88rem;
+    position: relative;
   }
 
-  .quiz-option:hover:not(.correct):not(.wrong) {
-    border-color: rgba(0, 212, 255, 0.4);
-    background: rgba(0, 212, 255, 0.05);
+  .quiz-option:hover:not(.correct):not(.wrong):not(:disabled) {
+    border-color: rgba(0, 212, 255, 0.5);
+    background: rgba(0, 212, 255, 0.08);
+    transform: translateX(4px);
+  }
+
+  .quiz-option:disabled {
+    cursor: default;
   }
 
   .quiz-option.correct {
@@ -726,32 +834,61 @@
   }
 
   .opt-letter {
-    width: 24px;
-    height: 24px;
+    width: 28px;
+    height: 28px;
     display: flex;
     align-items: center;
     justify-content: center;
     border-radius: 50%;
     background: rgba(0, 212, 255, 0.15);
-    font-size: 0.75rem;
+    font-size: 0.78rem;
     font-weight: 600;
     color: #00d4ff;
     flex-shrink: 0;
+    transition: all 0.2s;
+  }
+
+  .quiz-option.correct .opt-letter {
+    background: rgba(0, 255, 136, 0.25);
+    color: #00ff88;
+  }
+
+  .quiz-option.wrong .opt-letter {
+    background: rgba(255, 85, 119, 0.25);
+    color: #ff5577;
   }
 
   .opt-text {
     flex: 1;
   }
 
+  .opt-check {
+    color: #00ff88;
+    font-weight: 700;
+    font-size: 1rem;
+  }
+
+  .opt-cross {
+    color: #ff5577;
+    font-weight: 700;
+    font-size: 1rem;
+  }
+
   .quiz-rationale {
-    margin-top: 12px;
-    padding: 10px 14px;
-    border-radius: 6px;
+    margin-top: 16px;
+    padding: 14px 18px;
+    border-radius: 8px;
     background: rgba(0, 212, 255, 0.05);
     border: 1px solid rgba(0, 212, 255, 0.15);
-    color: rgba(255, 255, 255, 0.7);
-    font-size: 0.8rem;
-    line-height: 1.5;
+    color: rgba(255, 255, 255, 0.75);
+    font-size: 0.82rem;
+    line-height: 1.6;
+    animation: rationaleIn 0.3s ease;
+  }
+
+  @keyframes rationaleIn {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: translateY(0); }
   }
 
   .rationale-label {
@@ -761,7 +898,8 @@
 
   /* Quiz progress bar */
   .quiz-progress {
-    margin-bottom: 8px;
+    width: 100%;
+    margin-bottom: 4px;
   }
 
   .quiz-progress-bar {
@@ -776,7 +914,7 @@
     height: 100%;
     background: linear-gradient(90deg, #00d4ff, #00ff88);
     border-radius: 2px;
-    transition: width 0.3s ease;
+    transition: width 0.4s cubic-bezier(0.16, 1, 0.3, 1);
   }
 
   .quiz-progress-text {
@@ -791,24 +929,33 @@
   /* Quiz navigation */
   .quiz-nav {
     display: flex;
-    gap: 8px;
-    margin-bottom: 4px;
+    gap: 10px;
+    width: 100%;
+    justify-content: center;
   }
 
   .quiz-nav-btn {
-    padding: 6px 14px;
-    border-radius: 6px;
+    padding: 8px 18px;
+    border-radius: 8px;
     background: rgba(0, 212, 255, 0.08);
     border: 1px solid rgba(0, 212, 255, 0.25);
     color: rgba(0, 212, 255, 0.8);
-    font-size: 0.75rem;
+    font-size: 0.78rem;
     cursor: pointer;
     transition: all 0.2s;
   }
 
+  .quiz-nav-btn.primary {
+    background: rgba(0, 212, 255, 0.12);
+    border-color: rgba(0, 212, 255, 0.4);
+    color: #00d4ff;
+    font-weight: 500;
+  }
+
   .quiz-nav-btn:hover:not(:disabled) {
-    background: rgba(0, 212, 255, 0.15);
-    border-color: rgba(0, 212, 255, 0.5);
+    background: rgba(0, 212, 255, 0.18);
+    border-color: rgba(0, 212, 255, 0.6);
+    transform: translateY(-1px);
   }
 
   .quiz-nav-btn:disabled {
@@ -824,8 +971,57 @@
   }
 
   .quiz-nav-btn.reset:hover {
-    background: rgba(255, 85, 119, 0.1);
+    background: rgba(255, 85, 119, 0.12);
     border-color: rgba(255, 85, 119, 0.5);
+  }
+
+  /* Quiz mini grid */
+  .quiz-mini-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    justify-content: center;
+    width: 100%;
+    padding-top: 12px;
+    border-top: 1px solid rgba(255, 255, 255, 0.06);
+  }
+
+  .quiz-mini {
+    width: 32px;
+    height: 32px;
+    border-radius: 6px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    background: rgba(0, 0, 0, 0.3);
+    color: rgba(255, 255, 255, 0.5);
+    font-size: 0.7rem;
+    cursor: pointer;
+    transition: all 0.2s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .quiz-mini:hover {
+    border-color: rgba(0, 212, 255, 0.4);
+  }
+
+  .quiz-mini-active {
+    border-color: rgba(0, 212, 255, 0.7);
+    background: rgba(0, 212, 255, 0.12);
+    color: #00d4ff;
+    box-shadow: 0 0 8px rgba(0, 212, 255, 0.2);
+  }
+
+  .quiz-mini-correct {
+    background: rgba(0, 255, 136, 0.12);
+    border-color: rgba(0, 255, 136, 0.4);
+    color: rgba(0, 255, 136, 0.9);
+  }
+
+  .quiz-mini-wrong {
+    background: rgba(255, 85, 119, 0.12);
+    border-color: rgba(255, 85, 119, 0.4);
+    color: rgba(255, 85, 119, 0.9);
   }
 
   /* Quiz final score */
@@ -833,27 +1029,52 @@
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 8px;
-    padding: 24px;
+    gap: 12px;
+    padding: 40px;
     background: rgba(0, 255, 136, 0.05);
     border: 1px solid rgba(0, 255, 136, 0.2);
-    border-radius: 12px;
+    border-radius: 16px;
+    width: 100%;
+    animation: scoreIn 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  @keyframes scoreIn {
+    from { opacity: 0; transform: scale(0.9); }
+    to { opacity: 1; transform: scale(1); }
   }
 
   .score-icon {
-    font-size: 2rem;
+    font-size: 2.5rem;
   }
 
   .score-text {
     color: rgba(255, 255, 255, 0.9);
-    font-size: 1rem;
+    font-size: 1.1rem;
     font-weight: 500;
   }
 
   .score-pct {
     color: #00ff88;
-    font-size: 1.5rem;
+    font-size: 2rem;
     font-weight: 700;
+  }
+
+  .quiz-restart-btn {
+    margin-top: 8px;
+    padding: 10px 24px;
+    border-radius: 8px;
+    background: rgba(0, 212, 255, 0.1);
+    border: 1px solid rgba(0, 212, 255, 0.3);
+    color: #00d4ff;
+    font-size: 0.85rem;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .quiz-restart-btn:hover {
+    background: rgba(0, 212, 255, 0.2);
+    border-color: rgba(0, 212, 255, 0.5);
+    transform: translateY(-1px);
   }
 
   /* --- Flashcards --- */

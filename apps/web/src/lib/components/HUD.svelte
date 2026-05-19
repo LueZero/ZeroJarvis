@@ -331,7 +331,9 @@
         setYouTubeData((msg as any).data);
         break;
       case "error":
+        setState("idle");
         setError(msg.message);
+        setTimeout(() => setError(null), 6000);
         if (listening && !listenPaused && vadReady) {
           startVAD();
         }

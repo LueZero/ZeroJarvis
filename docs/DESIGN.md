@@ -1,7 +1,7 @@
 # ZeroJarvis — Jarvis 語音個人助理設計文件
 
-> **版本**：0.7.0  
-> **日期**：2026-05-11  
+> **版本**：0.8.0  
+> **日期**：2026-05-19  
 > **代號**：ZeroJarvis (零代理 — 零打字互動)
 
 ---
@@ -278,7 +278,7 @@ JSON payload（如 NOTEBOOK）使用 brace-counting 解析，不受巢狀 `]` �
 |------|----------|----------|
 | `markdown` | Markdown 文字 | HTML 渲染（報告、學習指南） |
 | `mindmap` | JSON 樹結構 | 可展開節點（`<details>`） |
-| `quiz` | JSON 題目陣列 | 多選卡片 + 互動答題 |
+| `quiz` | JSON 題目陣列 | 單題切換卡片 + 互動答題（含 hint 提示、transition 動畫、mini 導覽格、結算畫面） |
 | `flashcards` | JSON 正反面 | 3D 翻轉動畫卡片 |
 | `media` | 檔案路徑 | 下載按鈕 + 類型標籤 |
 | `table` | CSV 字串 | HTML 表格渲染 |
@@ -864,12 +864,19 @@ zerojarvis/
 │   │   │   │   ├── components/
 │   │   │   │   │   ├── HUD.svelte          # 主 HUD 介面
 │   │   │   │   │   ├── Waveform.svelte     # Arc Reactor 動畫
-│   │   │   │   │   ├── Subtitle.svelte     # 字幕 (玻璃面板)
+│   │   │   │   │   ├── Subtitle.svelte     # 字幕 (FloatingPanel)
+│   │   │   │   │   ├── FloatingPanel.svelte # 通用可拖曳浮動面板
+│   │   │   │   │   ├── SideHUD.svelte      # 側邊 HUD 選單
+│   │   │   │   │   ├── SummaryPanel.svelte  # Token 使用量面板 (F17)
 │   │   │   │   │   ├── CameraPreview.svelte # 攝像頭預覽 (科幻 HUD)
+│   │   │   │   │   ├── ScreenCaptureTool.svelte # 螢幕截圖框選工具 (F7)
 │   │   │   │   │   ├── MapOverlay.svelte    # 地圖覆蓋 (科幻 HUD)
+│   │   │   │   │   ├── RestaurantPanel.svelte # 餐廳搜尋結果面板
 │   │   │   │   │   ├── NotebookOverlay.svelte # NotebookLM 內容顯示 (6 種渲染)
 │   │   │   │   │   ├── YouTubeOverlay.svelte  # YouTube 內容覆蓋 (搜尋/影片/頻道/排行/比較)
 │   │   │   │   │   ├── SessionTabs.svelte   # 多會話底部 tab 列 (F9)
+│   │   │   │   │   ├── TaskPanel.svelte     # 背景任務面板 (F13)
+│   │   │   │   │   ├── TaskPopups.svelte    # 任務完成通知彈窗
 │   │   │   │   │   └── ConfirmPanel.svelte  # 確認面板
 │   │   │   │   ├── stores/
 │   │   │   │   │   └── agent.svelte.ts     # 全域狀態 (Svelte 5 Runes)
@@ -892,6 +899,8 @@ zerojarvis/
 │           │   └── whisper.ts       # Groq Whisper API
 │           ├── tts/
 │           │   └── edge-tts.ts      # Edge TTS
+│           ├── polish/
+│           │   └── polisher.ts      # STT 結果整理 (標點、格式)
 │           ├── vision/
 │           │   └── processor.ts     # 圖片分析
 │           ├── session/
@@ -903,7 +912,10 @@ zerojarvis/
 │           │   ├── scheduler.ts     # 定時排程（5 秒檢查）
 │           │   └── worker.ts        # OpenCode worker session 執行（含記憶注入）
 │           ├── ws/
-│           │   └── handler.ts       # WebSocket 訊息路由
+│           │   ├── handler.ts       # WebSocket 訊息路由
+│           │   ├── notebook-commands.ts # Notebook 語音指令偵測
+│           │   ├── session-commands.ts  # Session 語音指令偵測
+│           │   └── sanitize.ts      # 輸入清理 + 提示詞注入防範
 │           └── onetable-food/
 │               └── mcp-server.cjs   # OpenTable MCP Server (CDP)
 │           └── youtube/
@@ -990,7 +1002,8 @@ Skills 是 Markdown 文件，定義 AI 在特定情境下的行為規則。
 ├── notebooklm/SKILL.md       # NotebookLM 完整操作 (NOTEBOOK/NOTEBOOK_CLOSE)
 │                               #   問答、來源、產生、下載、筆記、分享
 │                               #   + 6 種 overlay 渲染（報告/心智圖/測驗/學習卡/媒體/表格）
-└── youtube/SKILL.md           # YouTube 搜尋/分析/比較/選題 (YOUTUBE/YOUTUBE_CLOSE + MCP youtube-toolkit)
+├── youtube/SKILL.md           # YouTube 搜尋/分析/比較/選題 (YOUTUBE/YOUTUBE_CLOSE + MCP youtube-toolkit)
+└── twinkle-hub/SKILL.md       # Twinkle Hub 互動控制
 
 .agents/skills/                ← 社群技能（skills.sh 安裝）
 ├── find-skills/SKILL.md       # 自動搜尋並安裝新技能 (vercel-labs/skills)
@@ -1033,9 +1046,28 @@ npx skills remove <name>
 
 ---
 
-## 12. 對話記憶與持久記憶系統
+## 12. 安全機制（Prompt Injection Defense）
 
-### 12.1 Session 記憶（單次對話）
+### 12.1 輸入清理（Gateway `ws/sanitize.ts`）
+- **注入偵測**：檢測常見攻擊模式（ignore instructions、system prompt、jailbreak 等）
+- **外部內容清理**：移除零寬字元、隱形 Unicode tags（U+E0000-E007F）
+- **工具輸出監控**：MCP 工具回傳結果自動偵測可疑指令模式，偵測到時記錄警告日誌
+
+### 12.2 LLM 層防護（`.opencode/instructions.md`）
+- 明確指示 AI 不遵從工具輸出/外部內容中的指令
+- 不洩漏系統提示詞、技能內容、ACTION 格式
+- 回覆不包含可執行注入（SQL、Shell 拼接等）
+
+### 12.3 前端錯誤恢復
+- LLM 錯誤時強制 `setState("idle")` 解除卡住狀態
+- 錯誤訊息 6 秒後自動消失
+- VAD 自動恢復聆聽
+
+---
+
+## 13. 對話記憶與持久記憶系統
+
+### 13.1 Session 記憶（單次對話）
 - OpenCode 使用 **Session** 持久化對話歷史
 - 同一 Session 內所有對話保留上下文（AI 記得之前說過的話）
 - 多會話管理由 Session Manager 統一控制
@@ -1045,7 +1077,7 @@ npx skills remove <name>
 - AI 智慧攚截：複合語句由 session Skill 驅動 → `[ACTION:NEW_SESSION]` 等
 - Vision 使用獨立 Session（不污染主對話，用完即刪）
 
-### 12.2 持久記憶系統（F14）
+### 13.2 持久記憶系統（F14）
 - **跨 Session 記憶**：使用者偏好、環境事實、歷史任務結果等持久化到磁碟
 - **儲存格式**：YAML frontmatter Markdown 檔案，存在 `files/memory/`
 - **標記機制**：AI 在回覆中嵌入 `[MEMORY:名稱:類型:內容]` 標記，Gateway 自動解析並儲存
@@ -1056,7 +1088,7 @@ npx skills remove <name>
 
 ---
 
-## 13. 未來規劃
+## 14. 未來規劃
 
 - [x] 螢幕截圖分析（前端框選截圖 + 標註，送 Vision 分析）
 - [x] 多會話管理（平行對話 + 語音切換 + 底部 tab 列）

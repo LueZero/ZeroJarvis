@@ -13,9 +13,17 @@ import * as taskWorker from "../task/worker.js";
 import * as scheduler from "../task/scheduler.js";
 import * as eventHub from "../task/event-hub.js";
 import * as memory from "../task/memory.js";
+import { detectNotebookCommand } from "./notebook-commands.js";
+import { detectInjection, sanitizeExternalContent } from "./sanitize.js";
 
 /** Route MCP tool output to the appropriate frontend overlay */
 function routeToolOutput(ws: ServerWebSocket<WSData>, toolName: string, output: string) {
+  // Prompt injection detection on external tool output
+  const injection = detectInjection(output);
+  if (injection) {
+    logWarn("SECURITY", `Potential injection in tool "${toolName}" output: pattern=${injection}`);
+  }
+
   if (toolName.includes("search_restaurants")) {
     try {
       const data = JSON.parse(output);
@@ -60,78 +68,6 @@ interface WSData {
   lastSttText: string;
   notebookActive: boolean;
   notebookType: NotebookContentType | null;
-}
-
-/** Session command patterns (loose match — tolerates punctuation and filler words) */
-const SESSION_COMMANDS: { cmd: "new" | "prev" | "next"; pattern: RegExp }[] = [
-  { cmd: "new", pattern: /新(的)?對話|開新的|new\s*chat/i },
-  { cmd: "prev", pattern: /(上|前)一個|切(到|換)?上一個|previous/i },
-  { cmd: "next", pattern: /(下|後)一個|切(到|換)?下一個|next/i },
-];
-
-/** Detect session voice commands from STT text */
-function detectSessionCommand(text: string): "new" | "prev" | "next" | null {
-  // Strip common punctuation Whisper may add
-  const cleaned = text.trim().replace(/[。，！？、.!?,\s]+$/g, "");
-  // Only match if the cleaned text is short (avoid false positives in longer sentences)
-  if (cleaned.length > 8) return null;
-  for (const { cmd, pattern } of SESSION_COMMANDS) {
-    if (pattern.test(cleaned)) return cmd;
-  }
-  return null;
-}
-
-// ── Notebook voice command patterns ──
-type NotebookCmd =
-  | { cmd: "answer"; value: number }
-  | { cmd: "next" | "prev" | "flip" | "reset" | "close" | "expand" | "collapse" | "scroll_down" | "scroll_up" };
-
-const NOTEBOOK_COMMANDS_QUIZ: { match: RegExp; result: NotebookCmd }[] = [
-  { match: /^[Aa]$|^答[Aa]$|^選[Aa]$/,   result: { cmd: "answer", value: 0 } },
-  { match: /^[Bb]$|^答[Bb]$|^選[Bb]$/,   result: { cmd: "answer", value: 1 } },
-  { match: /^[Cc]$|^答[Cc]$|^選[Cc]$/,   result: { cmd: "answer", value: 2 } },
-  { match: /^[Dd]$|^答[Dd]$|^選[Dd]$/,   result: { cmd: "answer", value: 3 } },
-  { match: /下一題|next/i,                result: { cmd: "next" } },
-  { match: /上一題|prev/i,                result: { cmd: "prev" } },
-  { match: /重新開始|reset/i,             result: { cmd: "reset" } },
-];
-
-const NOTEBOOK_COMMANDS_FLASHCARDS: { match: RegExp; result: NotebookCmd }[] = [
-  { match: /翻(轉|開|面)|flip/i,           result: { cmd: "flip" } },
-  { match: /下一張|next/i,                 result: { cmd: "next" } },
-  { match: /上一張|prev/i,                 result: { cmd: "prev" } },
-];
-
-const NOTEBOOK_COMMANDS_MINDMAP: { match: RegExp; result: NotebookCmd }[] = [
-  { match: /展開|expand/i,                 result: { cmd: "expand" } },
-  { match: /收合|collapse/i,               result: { cmd: "collapse" } },
-];
-
-const NOTEBOOK_COMMANDS_COMMON: { match: RegExp; result: NotebookCmd }[] = [
-  { match: /^關閉$|^close$/i,              result: { cmd: "close" } },
-  { match: /往下|向下|scroll\s*down/i,     result: { cmd: "scroll_down" } },
-  { match: /往上|向上|scroll\s*up/i,       result: { cmd: "scroll_up" } },
-];
-
-/** Detect notebook voice commands based on current content type */
-function detectNotebookCommand(text: string, contentType: NotebookContentType | null): NotebookCmd | null {
-  const cleaned = text.trim().replace(/[。，！？、.!?,\s]+$/g, "");
-  if (cleaned.length > 10) return null;
-
-  // Type-specific commands first
-  const typeCommands = contentType === "quiz" ? NOTEBOOK_COMMANDS_QUIZ
-    : contentType === "flashcards" ? NOTEBOOK_COMMANDS_FLASHCARDS
-    : contentType === "mindmap" ? NOTEBOOK_COMMANDS_MINDMAP
-    : [];
-
-  for (const { match, result } of typeCommands) {
-    if (match.test(cleaned)) return result;
-  }
-  // Common commands
-  for (const { match, result } of NOTEBOOK_COMMANDS_COMMON) {
-    if (match.test(cleaned)) return result;
-  }
-  return null;
 }
 
 function send(ws: ServerWebSocket<WSData>, msg: ServerMessage) {
