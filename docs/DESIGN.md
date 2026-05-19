@@ -62,6 +62,9 @@ AI 回覆中嵌入控制標記，由 Gateway 解析後轉發前端：
 | `[ACTION:MAP_CLOSE]` | 關閉地圖 |
 | `[ACTION:NOTEBOOK:{json}]` | 彈出 NotebookLM 內容覆蓋（報告/測驗/心智圖等） |
 | `[ACTION:NOTEBOOK_CLOSE]` | 關閉 NotebookLM 覆蓋 |
+| `[ACTION:YOUTUBE:{json}]` | 手動彈出 YouTube 覆蓋（後備，正常由 Gateway 自動路由） |
+| `[ACTION:YOUTUBE_CLOSE]` | 關閉 YouTube 覆蓋 |
+| `[ACTION:YOUTUBE_URL:url]` | 在瀏覽器開啟 YouTube 影片 |
 | `[ACTION:NEW_SESSION]` | 建立新對話（當前保留背景） |
 | `[ACTION:SESSION_PREV]` | 切到上一個對話 |
 | `[ACTION:SESSION_NEXT]` | 切到下一個對話 |
@@ -86,7 +89,7 @@ JSON payload（如 NOTEBOOK）使用 brace-counting 解析，不受巢狀 `]` �
 - 透過 OpenCode 的 `bash` 工具直接呼叫外部 CLI
 - 透過 OpenCode 的 MCP Server 連接專用自動化服務
 - AI 自主判斷何時呼叫工具
-- 目前已整合：`notebooklm-py`（Google NotebookLM CLI）、`onetable-food`（OpenTable MCP Server）
+- 目前已整合：`notebooklm-py`（Google NotebookLM CLI）、`onetable-food`（OpenTable MCP Server）、`youtube-toolkit`（YouTube Data API v3 MCP Server）
 
 ### F7：螢幕截圖分析（Screen Capture）
 ```
@@ -169,6 +172,69 @@ JSON payload（如 NOTEBOOK）使用 brace-counting 解析，不受巢狀 `]` �
 - 手機版 FAB 縮小至 48px，上移避開底部 UI
 - 觸發詞：「安靜」「不要聽了」「暫停聆聽」
 - 由 Skill 驅動（`.opencode/skills/listen-control/SKILL.md`）
+
+### F19：YouTube 研究與創作（YouTube Toolkit）
+```
+使用者: "幫我搜尋 Python 教學的影片"
+  → AI 載入 youtube skill（.opencode/skills/youtube/）
+  → MCP: youtube_search("Python 教學")
+  → YouTube Data API v3 → 回傳影片列表（含觀看數、按讚數、時長）
+  → Gateway 自動路由 → 前端彈出 YouTube 覆蓋（影片卡片列表，點擊開啟 YouTube）
+  → AI 口語化摘要（不重複列出，覆蓋層已顯示詳細資料）
+
+使用者: "分析這支影片 https://youtube.com/watch?v=xxx"
+  → MCP: youtube_video_info(url) + youtube_comments(url)
+  → AI 綜合分析：觀看數、互動率、留言情緒
+  → Gateway 自動路由 youtube_video_info → 前端顯示影片詳情面板
+  → youtube_comments 為純文字分析，不觸發覆蓋
+
+使用者: "幫我想個影片主題，關於 AI 工具"
+  → MCP: youtube_keyword_ideas("AI 工具") + youtube_trending()
+  → youtube_trending → 自動覆蓋顯示排行榜
+  → youtube_keyword_ideas → 純文字分析，AI 提供選題建議
+
+使用者: "幫我播這部影片"
+  → AI 回覆 + [ACTION:YOUTUBE_URL:https://youtube.com/watch?v=xxx]
+  → 前端在瀏覽器開啟影片
+```
+
+**MCP Server**（`services/gateway/src/youtube/mcp-server.cjs`）— JSON-RPC 2.0 over stdio
+- 使用 YouTube Data API v3（需設定 `YOUTUBE_API_KEY` 環境變數）
+- 純 Node.js HTTPS 請求，無需瀏覽器
+
+**MCP 工具清單：**
+| 工具 | 功能 | 前端覆蓋 |
+|------|------|----------|
+| `youtube_search` | 關鍵字搜尋影片（含觀看數/按讚數/時長） | ✅ search |
+| `youtube_video_info` | 單支影片詳細資訊（標籤、描述、互動率） | ✅ video |
+| `youtube_channel_info` | 頻道統計 + 近期影片 | ✅ channel |
+| `youtube_trending` | 地區熱門影片排行榜 | ✅ trending |
+| `youtube_compare` | 多影片數據比較 | ✅ compare |
+| `youtube_comments` | 影片留言分析 | ❌ 純文字 |
+| `youtube_transcript` | 字幕可用性查詢 | ❌ 純文字 |
+| `youtube_keyword_ideas` | SEO 關鍵字建議 + 競爭分析 | ❌ 純文字 |
+
+**覆蓋層自動路由**：Gateway 的 `routeToolOutput()` 偵測到 MCP 工具名稱包含 `youtube_` 後，
+自動匹配 5 種 overlay type（search/video/channel/trending/compare），前端無需 AI 手動構建 YOUTUBE ACTION。
+其餘 3 個工具（comments/transcript/keyword_ideas）不匹配 typeMap，僅回傳文字供 AI 分析。
+
+**技能：**
+| 技能 | 路徑 | 功能 |
+|------|------|------|
+| `youtube` | `.opencode/skills/youtube/` | 搜尋、分析、比較、創作建議 + MCP 工具 + ACTION 指令 |
+
+**YouTube Overlay（前端視覺呈現）：**
+| type | 資料來源 | 渲染方式 |
+|------|----------|----------|
+| `search` | `youtube_search` → `data.results[]` | 卡片網格（縮圖 + 數據） |
+| `video` | `youtube_video_info` → 單物件 | 大卡片詳情（含描述/標籤） |
+| `channel` | `youtube_channel_info` → `data.recentVideos[]` | 頻道頭像 + 統計 + 近期影片 |
+| `trending` | `youtube_trending` → `data.videos[]` | 帶排名的卡片列表 |
+| `compare` | `youtube_compare` → `data.videos[]` | 並排數據卡片（含互動率） |
+
+**資料欄位對齊**：所有 MCP 工具回傳的影片物件均包含 `YouTubeVideoItem` 所需的扁平欄位
+（`id`, `title`, `channel`, `thumbnail`, `url`, `views`, `likes`, `comments`, `duration`），
+`views`/`likes`/`comments` 統一為格式化字串（如 "1.2M"），確保 Overlay 正確顯示。
 
 **麥克風暫停（禁止聆聽）機制：**
 - 暫停狀態由 `listening` + `listenPaused` 兩個旗標共同管理
@@ -741,6 +807,9 @@ type ServerMessage =
   | { type: "tool_call"; name: string; args: any } // 工具呼叫通知
   | { type: "state"; state: AgentState }           // 狀態變更
   | { type: "error"; message: string }             // 錯誤
+  | { type: "food_results"; data: FoodSearchData }     // 餐廳搜尋結果 → MapOverlay
+  | { type: "opentable_results"; data: OpenTableResult } // 訂位結果
+  | { type: "youtube_results"; data: YouTubeData }       // YouTube 資料 → YouTubeOverlay
   // 多會話系統 (F9)
   | { type: "session_list"; sessions: SessionTab[] }  // 所有 session 狀態
   | { type: "session_switch"; sessionId: string; state: SessionSnapshot } // 切換 session
@@ -799,6 +868,7 @@ zerojarvis/
 │   │   │   │   │   ├── CameraPreview.svelte # 攝像頭預覽 (科幻 HUD)
 │   │   │   │   │   ├── MapOverlay.svelte    # 地圖覆蓋 (科幻 HUD)
 │   │   │   │   │   ├── NotebookOverlay.svelte # NotebookLM 內容顯示 (6 種渲染)
+│   │   │   │   │   ├── YouTubeOverlay.svelte  # YouTube 內容覆蓋 (搜尋/影片/頻道/排行/比較)
 │   │   │   │   │   ├── SessionTabs.svelte   # 多會話底部 tab 列 (F9)
 │   │   │   │   │   └── ConfirmPanel.svelte  # 確認面板
 │   │   │   │   ├── stores/
@@ -836,6 +906,8 @@ zerojarvis/
 │           │   └── handler.ts       # WebSocket 訊息路由
 │           └── onetable-food/
 │               └── mcp-server.cjs   # OpenTable MCP Server (CDP)
+│           └── youtube/
+│               └── mcp-server.cjs   # YouTube MCP Server (Data API v3)
 ├── config/
 │   ├── booking.json                 # 訂位人資訊（姓名/電話/email）
 │   └── schedules.json               # 排程持久化（自動產生，git-ignored）
@@ -899,6 +971,7 @@ Desktop 版載入 Web UI（https://localhost:3000），額外支援：
 | `GROQ_API_KEY` | Groq Whisper STT | (必填) |
 | `OPENCODE_URL` | OpenCode Server URL | `http://localhost:4096` |
 | `TTS_VOICE` | TTS 語音 | `zh-TW-HsiaoChenNeural` |
+| `YOUTUBE_API_KEY` | YouTube Data API v3 | (youtube-toolkit 必填) |
 
 ---
 
@@ -914,9 +987,10 @@ Skills 是 Markdown 文件，定義 AI 在特定情境下的行為規則。
 ├── screenshot/SKILL.md        # 螢幕截圖 (SCREENSHOT)
 ├── session/SKILL.md           # 多會話管理 (NEW_SESSION/SESSION_PREV/NEXT)
 ├── listen-control/SKILL.md   # 聆聽控制 (LISTEN_PAUSE/LISTEN_RESUME)
-└── notebooklm/SKILL.md       # NotebookLM 完整操作 (NOTEBOOK/NOTEBOOK_CLOSE)
-                               #   問答、來源、產生、下載、筆記、分享
-                               #   + 6 種 overlay 渲染（報告/心智圖/測驗/學習卡/媒體/表格）
+├── notebooklm/SKILL.md       # NotebookLM 完整操作 (NOTEBOOK/NOTEBOOK_CLOSE)
+│                               #   問答、來源、產生、下載、筆記、分享
+│                               #   + 6 種 overlay 渲染（報告/心智圖/測驗/學習卡/媒體/表格）
+└── youtube/SKILL.md           # YouTube 搜尋/分析/比較/選題 (YOUTUBE/YOUTUBE_CLOSE + MCP youtube-toolkit)
 
 .agents/skills/                ← 社群技能（skills.sh 安裝）
 ├── find-skills/SKILL.md       # 自動搜尋並安裝新技能 (vercel-labs/skills)
@@ -994,6 +1068,7 @@ npx skills remove <name>
 - [x] 社群技能整合（skills.sh 生態系 — find-skills / skill-creator / mcp-builder / claude-api 等 9 個技能）
 - [x] 背景任務系統（ASYNC_TASK 即時背景 + SCHEDULE 定時排程 + SCHEDULE_REPEAT 重複排程 + Task Panel UI）
 - [x] 記憶系統（持久化檔案記憶 + Worker 記憶注入 + 任務結果持久化 + AI 主動寫入記憶）
+- [x] YouTube 研究與創作（YouTube Data API v3 MCP Server + 搜尋/分析/比較/關鍵字 + 前端 Overlay）
 - [ ] NotebookLM 線上播放（音視訊 serve + `<audio>`/`<video>` 播放器）
 - [ ] Session 持久化（SQLite，重啟保留歷史）
 - [ ] 語音快捷指令（自訂短語對應動作）

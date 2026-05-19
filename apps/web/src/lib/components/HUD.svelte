@@ -6,6 +6,7 @@
   import Subtitle from "./Subtitle.svelte";
   import CameraPreview from "./CameraPreview.svelte";
   import MapOverlay from "./MapOverlay.svelte";
+  import YouTubeOverlay from "./YouTubeOverlay.svelte";
   import NotebookOverlay from "./NotebookOverlay.svelte";
   import SessionTabs from "./SessionTabs.svelte";
   import ScreenCaptureTool from "./ScreenCaptureTool.svelte";
@@ -30,6 +31,9 @@
     clearMapQuery,
     getFoodData,
     setFoodData,
+    getYouTubeData,
+    setYouTubeData,
+    clearYouTubeData,
     getNotebookContent,
     setNotebookContent,
     clearNotebookContent,
@@ -323,6 +327,9 @@
       case "food_results":
         setFoodData((msg as any).data);
         break;
+      case "youtube_results":
+        setYouTubeData((msg as any).data);
+        break;
       case "error":
         setError(msg.message);
         if (listening && !listenPaused && vadReady) {
@@ -358,6 +365,22 @@
         break;
       case "MAP_CLOSE":
         clearMapQuery();
+        break;
+      case "YOUTUBE":
+        if (payload) {
+          try {
+            const yt = JSON.parse(payload);
+            setYouTubeData(yt);
+          } catch {}
+        }
+        break;
+      case "YOUTUBE_CLOSE":
+        clearYouTubeData();
+        break;
+      case "YOUTUBE_URL":
+        if (payload) {
+          try { window.open(payload, "_blank", "noopener"); } catch {}
+        }
         break;
       case "NOTEBOOK":
         if (payload) {
@@ -659,6 +682,11 @@
     <MapOverlay query={getMapQuery()} foodData={getFoodData()} onClose={clearMapQuery} />
   {/if}
 
+  <!-- YouTube overlay (triggered by [ACTION:YOUTUBE:json] or youtube_results) -->
+  {#if getYouTubeData()}
+    <YouTubeOverlay data={getYouTubeData()!} onClose={clearYouTubeData} />
+  {/if}
+
   <!-- NotebookLM overlay (triggered by [ACTION:NOTEBOOK:json]) -->
   {#if getNotebookContent()}
     <NotebookOverlay bind:this={notebookRef} content={getNotebookContent()!} onClose={() => { clearNotebookContent(); send({ type: "notebook_state", active: false } as any); }} />
@@ -666,18 +694,18 @@
 
   <!-- Conversation holo windows (AI / User / Error — draggable & closable) -->
   <!-- Hidden when a fullscreen overlay is active (camera/map/notebook/screenshot) -->
-  {#if !getCameraOn() && !getMapQuery() && !getNotebookContent() && !screenshotActive}
+  {#if !getCameraOn() && !getMapQuery() && !getYouTubeData() && !getNotebookContent() && !screenshotActive}
     <Subtitle />
   {/if}
 
   <!-- Background task popups (also hidden under fullscreen overlays to avoid -->
   <!-- visually-trapped panels behind opaque overlays) -->
-  {#if !getCameraOn() && !getMapQuery() && !getNotebookContent() && !screenshotActive}
+  {#if !getCameraOn() && !getMapQuery() && !getYouTubeData() && !getNotebookContent() && !screenshotActive}
     <TaskPopups />
   {/if}
 
   <!-- Text input — Sci-fi command console (also hidden under fullscreen overlays) -->
-  {#if showChatInput && !getCameraOn() && !getMapQuery() && !getNotebookContent() && !screenshotActive}
+  {#if showChatInput && !getCameraOn() && !getMapQuery() && !getYouTubeData() && !getNotebookContent() && !screenshotActive}
     <div
       class="cmd-console"
       class:has-tabs={getSessions().length > 1}
@@ -727,7 +755,7 @@
   {/if}
 
   <!-- Session tabs (bottom bar, only shown when >1 session and no fullscreen overlay) -->
-  {#if !getCameraOn() && !getMapQuery() && !getNotebookContent() && !screenshotActive}
+  {#if !getCameraOn() && !getMapQuery() && !getYouTubeData() && !getNotebookContent() && !screenshotActive}
     <SessionTabs onSwitch={(id) => send({ type: 'switch_session', sessionId: id } as any)} />
   {/if}
 

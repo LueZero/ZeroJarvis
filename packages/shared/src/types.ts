@@ -40,6 +40,8 @@ export type ServerMessage =
   | { type: "error"; message: string }
   | { type: "food_results"; data: FoodSearchData }
   | { type: "opentable_results"; data: OpenTableResult }
+  // YouTube
+  | { type: "youtube_results"; data: YouTubeData }
   // Multi-Session (F9)
   | { type: "session_list"; sessions: SessionTab[] }
   | { type: "session_switch"; sessionId: string; state: SessionSnapshot }
@@ -211,6 +213,29 @@ export type ActivityEvent =
   | { kind: "reasoning"; text: string }
   | { kind: "step_start" }
   | { kind: "step_finish"; cost: number; tokens: { input: number; output: number; reasoning: number } };
+
+// --- YouTube Data ---
+export type YouTubeOverlayType = "search" | "video" | "channel" | "trending" | "compare";
+
+export interface YouTubeVideoItem {
+  id: string;
+  title: string;
+  channel: string;
+  channelId?: string;
+  publishedAt?: string;
+  thumbnail?: string;
+  url?: string;
+  views?: string;
+  likes?: string;
+  comments?: string;
+  duration?: string;
+  engagementRate?: string;
+}
+
+export interface YouTubeData {
+  type: YouTubeOverlayType;
+  data: Record<string, unknown>;
+}
 
 // --- NotebookLM Content Display ---
 export type NotebookContentType = "markdown" | "mindmap" | "quiz" | "flashcards" | "media" | "table";

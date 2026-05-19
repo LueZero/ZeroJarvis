@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  語音驅動 · 視覺分析 · 地圖導航 · 餐廳訂位 · 筆記查詢<br/>
+  語音驅動 · 視覺分析 · 地圖導航 · 餐廳訂位 · 筆記查詢 · YouTube 分析<br/>
   基於 <a href="https://opencode.ai/">OpenCode</a> Agent 架構，搭配 <a href="https://skills.sh/">skills.sh</a> 社群技能生態系
 </p>
 
@@ -39,6 +39,9 @@
 | 「30 秒後提醒我開會」 | ⏰ 定時排程 → 時間到語音通知 |
 | 「幫我比較三間日式餐廳」 | 🔄 背景任務執行 → 完成後語音報告 |
 | 「我不吃辣」 | 🧠 持久記憶 → 下次推薦餐廳自動排除辣味 |
+| 「幫我搜尋 Python 教學的影片」 | 🎬 YouTube 搜尋 → 彈出影片卡片列表 → 語音摘要 |
+| 「分析這支 YouTube 影片」 | 📊 影片數據 + 留言分析 → 互動率 / 觀眾情緒 |
+| 「幫我想個影片主題，關於 AI 工具」 | 💡 關鍵字研究 + 趨勢分析 → 數據驅動選題建議 |
 
 > **設計哲學**：所有互動都從語音開始，AI 透過 `[ACTION]` 標記主動控制前端 UI（攝像頭、地圖、截圖工具等），而非被動等待使用者操作。
 
@@ -54,6 +57,7 @@
 - **📷 視覺分析** — 攝像頭拍照 + 螢幕截圖，送 Vision Agent 分析
 - **🗺️ 地圖導航** — AI 推薦地點後自動彈出 Google Maps
 - **🍽️ 餐廳訂位** — OpenTable 全自動化（MCP Server + Playwright CDP）
+- **🎬 YouTube 研究與創作** — 影片搜尋、數據分析、競品比較、SEO 關鍵字、選題建議（YouTube Data API v3 MCP）
 - **📓 NotebookLM** — 查詢筆記本、產生 Podcast、測驗、心智圖
 - **🖥️ 桌面應用** — Tauri 2.0 原生桌面版，支援 `Ctrl+Space` 全域喚醒
 
@@ -81,6 +85,9 @@
 │                  ┌─────▼─────────────────┐                  │
 │                  │  MCP: onetable-food    │                 │
 │                  │  Playwright CDP → Chrome│                │
+│                  ├─────────────────────────┤                  │
+│                  │  MCP: youtube-toolkit   │                 │
+│                  │  YouTube Data API v3    │                 │
 │                  └───────────────────────┘                  │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -126,6 +133,7 @@ cp .env.example .env
 | 變數 | 必要性 | 取得方式 |
 |------|--------|----------|
 | `GROQ_API_KEY` | **必填** | [console.groq.com/keys](https://console.groq.com/keys)（免費） |
+| `YOUTUBE_API_KEY` | 選填 | [console.cloud.google.com](https://console.cloud.google.com/apis/credentials)（YouTube Data API v3） |
 | `OPENCODE_URL` | 選填 | 預設 `http://localhost:4096` |
 | `TTS_VOICE` | 選填 | 預設 `zh-TW-HsiaoChenNeural` |
 
@@ -173,6 +181,7 @@ ZeroJarvis/
 │   └── gateway/               # Bun WebSocket 語音閘道           :3100
 │       └── src/
 │           ├── onetable-food/  # OpenTable MCP Server (CDP)
+│           ├── youtube/        # YouTube MCP Server (Data API v3)
 │           └── task/          # 背景任務 + 記憶系統
 │               └── memory.ts  #   持久記憶 (files/memory/)
 ├── packages/
@@ -187,6 +196,8 @@ ZeroJarvis/
 │       ├── screenshot/        #   螢幕截圖
 │       ├── session/           #   多會話管理
 │       ├── listen-control/    #   聆聽控制
+│       ├── youtube/           #   YouTube 搜尋 / 分析 / 比較（MCP 觸發）
+│       ├── twinkle-hub/       #   Twinkle Hub 整合
 │       └── notebooklm/        #   NotebookLM 整合
 ├── .agents/skills/            # 社群技能（skills.sh 安裝）
 ├── config/booking.json        # 訂位人資訊
@@ -228,6 +239,8 @@ AI 在回覆中嵌入 ACTION 標記來主動控制前端，標記會被自動移
 | `[ACTION:CAPTURE]` | 擷取攝像頭畫面 → Vision 分析 |
 | `[ACTION:SCREENSHOT]` | 擷取電腦螢幕 → Vision 分析 |
 | `[ACTION:MAP:搜尋詞]` / `MAP_CLOSE` | 彈出 / 關閉 Google Maps |
+| `[ACTION:YOUTUBE:{json}]` / `YOUTUBE_CLOSE` | 顯示 / 關閉 YouTube 內容覆蓋 |
+| `[ACTION:YOUTUBE_URL:url]` | 在瀏覽器開啟 YouTube 影片 |
 | `[ACTION:NOTEBOOK:{json}]` / `NOTEBOOK_CLOSE` | 顯示 / 關閉 NotebookLM 內容 |
 | `[ACTION:NEW_SESSION]` | 建立新對話 |
 | `[ACTION:SESSION_PREV]` / `NEXT` | 切換對話 |
@@ -283,6 +296,7 @@ Skills 是 SKILL.md 文件，定義 AI 在特定情境下的行為。OpenCode �
 ├── frontend-design/           # 前端 UI 設計
 ├── web-design-guidelines/     # UI/UX 審查
 ├── pdf/  docx/  xlsx/         # 文件處理
+└── web-design-guidelines/     # UI/UX 審查
 ```
 
 ### 安裝社群技能
@@ -308,6 +322,7 @@ npx skills update      # 更新全部
 | **TTS** | edge-tts | 免費、低延遲語音合成 |
 | **LLM** | OpenCode + Claude Sonnet | Agent Loop + 工具呼叫 |
 | **MCP** | onetable-food (Playwright CDP) | OpenTable 餐廳推薦 + 自動訂位 |
+| **MCP** | youtube-toolkit (YouTube Data API v3) | 影片搜尋 / 分析 / 比較 / SEO |
 | **Monorepo** | pnpm workspace | apps/ + services/ + packages/ |
 
 ## 開發
