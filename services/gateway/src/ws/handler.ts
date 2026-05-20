@@ -623,6 +623,40 @@ export function handleWebSocket() {
           break;
         }
 
+        case "quiz_feedback": {
+          const fb = msg as any;
+          const correct = fb.correct as boolean;
+          const correctAnswer = fb.correctAnswer as string;
+          const rationale = fb.rationale as string | undefined;
+          const isLast = fb.isLast as boolean;
+
+          let ttsText = correct
+            ? `答對了！`
+            : `答錯了！正確答案是 ${correctAnswer}。`;
+          if (rationale) {
+            ttsText += ` ${rationale}`;
+          }
+          if (!isLast) {
+            ttsText += ` 要進入下一題嗎？`;
+          } else {
+            ttsText += ` 這是最後一題，測驗結束！`;
+          }
+
+          log("QUIZ", `Feedback: correct=${correct} → "${ttsText.slice(0, 60)}..."`);
+          send(ws, { type: "llm_done", text: ttsText });
+          try {
+            setState(ws, "speaking");
+            const audioData = await synthesize(ttsText);
+            ws.send(audioData);
+            send(ws, { type: "tts_end" });
+            setState(ws, "idle");
+          } catch (ttsErr) {
+            logWarn("QUIZ", `TTS failed for quiz feedback: ${ttsErr}`);
+            setState(ws, "idle");
+          }
+          break;
+        }
+
         // F17: Manual session compaction
         case "summarize_session": {
           const active = sessionManager.getActive();

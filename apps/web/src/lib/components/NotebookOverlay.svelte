@@ -11,9 +11,10 @@
     content: NotebookContent;
     onClose: () => void;
     onVoiceCommand?: (cmd: any) => void;
+    onQuizFeedback?: (feedback: { correct: boolean; correctAnswer: string; rationale?: string; isLast: boolean }) => void;
   }
 
-  let { content, onClose }: Props = $props();
+  let { content, onClose, onQuizFeedback }: Props = $props();
 
   // --- Quiz State ---
   let selectedAnswers = $state<Record<number, number>>({});
@@ -154,7 +155,17 @@
       case "answer": {
         const qs = quizQuestions();
         if (qs && cmd.value !== undefined && currentQuestion < qs.length) {
+          const q = qs[currentQuestion];
+          const alreadyAnswered = selectedAnswers[currentQuestion] !== undefined;
           selectAnswer(currentQuestion, cmd.value);
+          // Emit voice feedback only for new answers (not re-visits)
+          if (!alreadyAnswered && onQuizFeedback) {
+            const isCorrect = cmd.value === q.correct;
+            const correctLetter = String.fromCharCode(65 + q.correct);
+            const correctText = `${correctLetter}. ${q.options[q.correct]}`;
+            const isLast = currentQuestion >= qs.length - 1;
+            onQuizFeedback({ correct: isCorrect, correctAnswer: correctText, rationale: q.rationale, isLast });
+          }
         }
         break;
       }

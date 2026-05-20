@@ -21,6 +21,7 @@ export type ClientMessage =
   | { type: "switch_session"; sessionId: string }
   | { type: "config"; settings: Partial<UserConfig> }
   | { type: "notebook_state"; active: boolean; contentType?: NotebookContentType }
+  | { type: "quiz_feedback"; correct: boolean; correctAnswer: string; rationale?: string; isLast: boolean }
   | { type: "task_delete"; taskId: string }
   // Compaction (F17)
   | { type: "summarize_session" };

@@ -691,7 +691,7 @@
 
   <!-- NotebookLM overlay (triggered by [ACTION:NOTEBOOK:json]) -->
   {#if getNotebookContent()}
-    <NotebookOverlay bind:this={notebookRef} content={getNotebookContent()!} onClose={() => { clearNotebookContent(); send({ type: "notebook_state", active: false } as any); }} />
+    <NotebookOverlay bind:this={notebookRef} content={getNotebookContent()!} onClose={() => { clearNotebookContent(); send({ type: "notebook_state", active: false } as any); }} onQuizFeedback={(fb) => { send({ type: "quiz_feedback", ...fb } as any); }} />
   {/if}
 
   <!-- Conversation holo windows (AI / User / Error — draggable & closable) -->
