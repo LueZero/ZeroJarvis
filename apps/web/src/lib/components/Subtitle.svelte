@@ -123,7 +123,7 @@
     tone="cyan"
     defaultX={160}
     defaultY={440}
-    defaultWidth={400}
+    defaultWidth={520}
     pulse={displayedLlm.length < getLlmText().length || getState() === "thinking"}
     onClose={() => { aiDismissedFor = getLlmText(); setLlmText(""); }}
   >
@@ -136,7 +136,7 @@
 <style>
   .msg-text {
     font-family: var(--font);
-    font-size: 0.95rem;
+    font-size: clamp(1.05rem, 1.8vw, 1.5rem);
     line-height: 1.55;
     white-space: pre-wrap;
     word-break: break-word;
@@ -250,11 +250,11 @@
   .msg-text.user {
     color: rgba(210, 200, 255, 0.85);
     font-style: italic;
-    font-size: 0.88rem;
+    font-size: clamp(0.95rem, 1.5vw, 1.3rem);
   }
   .msg-text.danger {
     color: var(--danger);
-    font-size: 0.88rem;
+    font-size: clamp(0.95rem, 1.5vw, 1.3rem);
   }
   .cursor {
     display: inline-block;

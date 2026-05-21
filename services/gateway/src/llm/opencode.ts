@@ -174,7 +174,7 @@ export function parseMemory(text: string): { cleanText: string; memories: { name
 }
 
 /** Strip markdown syntax from text so TTS reads naturally.
- *  Removes headings markers, bold/italic markers, code fences, links, etc. */
+ *  Removes headings markers, bold/italic markers, code fences, links, emojis, special symbols, etc. */
 export function stripMarkdown(text: string): string {
   return text
     // Code blocks (``` ... ```)
@@ -206,8 +206,16 @@ export function stripMarkdown(text: string): string {
     .replace(/^[-*_]{3,}\s*$/gm, "")
     // HTML tags (basic)
     .replace(/<[^>]+>/g, "")
+    // Emojis (Unicode emoji ranges)
+    .replace(/[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{1F1E0}-\u{1F1FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{FE00}-\u{FE0F}\u{1F900}-\u{1F9FF}\u{1FA00}-\u{1FA6F}\u{1FA70}-\u{1FAFF}\u{200D}\u{20E3}\u{E0020}-\u{E007F}]/gu, "")
+    // Special symbols that TTS reads awkwardly (★☆●○■□▲△▶◀◆◇※→←↑↓✓✗✔✘⚡💡🔥🎉👍📚🔄⏳✅❌⏭️)
+    .replace(/[★☆●○■□▲△▶◀◆◇※✓✗✔✘]/g, "")
+    // Leftover standalone special punctuation that adds nothing vocally
+    .replace(/\s*[|─━═╔╗╚╝╠╣╦╩]+\s*/g, " ")
     // Multiple blank lines → single
     .replace(/\n{3,}/g, "\n\n")
+    // Multiple spaces → single
+    .replace(/ {2,}/g, " ")
     .trim();
 }
 

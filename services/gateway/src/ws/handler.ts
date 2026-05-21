@@ -936,6 +936,7 @@ export async function processAudio(ws: ServerWebSocket<WSData>) {
     ttsText = parseSchedule(ttsText).cleanText;
     ttsText = parseScheduleRepeat(ttsText).cleanText;
     ttsText = parseMemory(ttsText).cleanText;
+    ttsText = stripMarkdown(ttsText);
     if (actions.some(a => a.action === "CAPTURE")) {
       if (ttsText && sessionManager.getActiveId() === managedSessionId) {
         setState(ws, "speaking");
